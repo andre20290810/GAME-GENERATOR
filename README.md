@@ -32,9 +32,24 @@ built-in defaults in `ggp/ggp-boot.js`, identical to `game.json`).
 ## Deploy
 
 Plain static site, output directory = repository root, no build command.
-Works as-is on GitHub Pages (`.nojekyll` included) or Cloudflare Pages
-(build command: none, output directory: `/`). There is no `CNAME`; set a
-custom domain in the hosting settings if you want one.
+There is no `CNAME`; set a custom domain in the hosting settings if you want one.
+
+**Cloudflare Workers (Static Assets)** — `wrangler.jsonc` serves the repository
+root as static assets with no Worker script. `.assetsignore` keeps repository
+files (`.git`, `README.md`, the config files) out of the upload.
+
+```
+npx wrangler deploy            # first run asks you to log in to Cloudflare
+```
+
+Or connect the repository in the Cloudflare dashboard (Workers & Pages >
+Create > Import a repository) with deploy command `npx wrangler deploy` and
+no build command. The site is then at `https://game-generator.<subdomain>.workers.dev`
+(`/` = default game, `/generator` = Generator). Cloudflare drops `.html` from
+URLs with a redirect that keeps the query string, so the Generator preview
+(`index.html?ggp=preview`) works unchanged.
+
+Also works as-is on GitHub Pages (`.nojekyll` included).
 
 ## Files
 

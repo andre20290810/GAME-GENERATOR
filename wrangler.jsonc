@@ -1,0 +1,10 @@
+// Cloudflare Workers Static Assets: serves this repository as a static site.
+// No Worker script and no build step — every request is answered from the
+// files below. Deploy with `npx wrangler deploy`.
+{
+  "name": "game-generator",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "."
+  }
+}
