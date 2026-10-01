@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>DARKOUT 2</title>
+<!-- 9TH ROUND (spec sections 47-51): no favicon/apple-touch-icon/manifest
+     icon/OG/Twitter-card tags existed at all before this round (confirmed
+     by grep of the previous index.html) — these are new additions using
+     the user-attached "DARK OUT" title/PLAYER/GABRIEL artwork, resized
+     (never cropped or stretched — source is already a perfect 1:1 square,
+     2576x2576) to each standard size. See the completion report for the
+     explicit legibility finding: at true 16x16 the artwork is not
+     recognizable, and at 32x32 the "DARK OUT" text is not legible either
+     (only a rough red-silhouette impression survives) — this is reported
+     as a known limitation rather than papering over it with an invented
+     alternate design, per instruction. 180px+ (apple-touch-icon, manifest
+     icon, OG/Twitter card) are all clearly legible. -->
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icon/favicon-32.png?v=1">
+<link rel="icon" type="image/png" sizes="16x16" href="assets/icon/favicon-16.png?v=1">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/icon/apple-touch-icon.png?v=1">
+<meta property="og:title" content="DARKOUT 2">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/icon/og-image.jpg?v=1">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="DARKOUT 2">
+<meta name="twitter:image" content="assets/icon/og-image.jpg?v=1">
+<link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+<!-- 29TH ROUND (item 10): every <button> in this file carries tabindex="-1".
+     Root-cause investigation (fresh, not reusing the prior round's blur()-
+     after-the-fact hypothesis) for "PAUSE→RESUME後、タップしないとGamepadが
+     効かない" found that ALL input here is already driven by this game's own
+     poll-based reading of navigator.getGamepads() (pollGamepad()) and
+     pointerdown listeners — never by native browser focus+Enter/click
+     activation. But gamepad-capable WebViews independently run their own
+     native "D-PAD moves focus between focusable elements" accessibility
+     bridge, entirely outside this game's control, which can silently steal
+     the controller's D-PAD/stick input as native focus-navigation attempts
+     instead of relaying it to the Gamepad API at all — exactly the
+     "stuck until a touch resets focus" symptom reported, and NOT fixed
+     reliably by blurring a specific element after a specific event (the
+     prior round's togglePauseMenu() fix), since that only clears focus
+     AFTER the fact and only at one call site. tabindex="-1" removes every
+     button from the browser's own focus order everywhere on the page (not
+     just PAUSE), so that native bridge has nothing to move focus TO in the
+     first place — prevention at the root, layered on top of (not replacing)
+     the existing blur() defense-in-depth calls. Pointer/touch/click
+     activation is completely unaffected by tabindex. -->
+<div id="rotate-notice">
+  <div class="rotate-icon">&#8635;</div>
+  <div>スマートフォンを横向きにしてください</div>
+  <div class="rotate-sub">LANDSCAPE ONLY</div>
+</div>
+
+<div id="game-root">
+
+  <canvas id="scene-canvas"></canvas>
+
+  <!-- 5TH ROUND PART 17/18/19/20: real asset-readiness LOADING gate — this
+       prototype previously had NONE at all (gameplay/input began the
+       instant the page loaded, before sprites had actually arrived).
+       Blocks the mode-select screen below until every REQUIRED image
+       (all real character sprites + barrel) is genuinely confirmed loaded
+       via checkAssetsReady() in game.js — never a fixed timer. 6TH ROUND:
+       BGM is intentionally NOT part of this gate any more — see
+       checkAssetsReady()'s own comment for the root-caused reason (mobile
+       browsers can legitimately never reach a "buffered" audio state
+       before a user gesture, which used to deadlock this screen at 98%
+       forever on exactly the devices this game targets).
+       6TH ROUND PART 3: the walk-loop below is a LOADING-SCREEN-ONLY
+       visual — it reuses the player's real north-walk sprites but is
+       driven by its own tiny interval in game.js, completely separate
+       from state.player/state.enemy/the real game loop (see
+       startLoadingWalkAnimation()). 7TH ROUND PART 1/2/3: the old
+       "#loading-ground" scrolling-floor illusion is removed entirely — the
+       spec explicitly asks for "the character himself slowly walking
+       through darkness", not a fast-scrolling background standing in for
+       walking. "#loading-spotlight" is a purely CSS radial-gradient cone
+       positioned just ahead of the walk sprite (see style.css) — no new
+       image asset. -->
+  <div id="loading-screen">
+    <!-- BOOT FLOW ROUND: official title/intro video, plays full-screen from
+         the very first frame — see game.js's intro-video segment-loop logic
+         for why currentTime is driven manually during LOADING (0.0-1.5s
+         only) and switched to a native full-length loop() once assets hit
+         100%. muted+playsinline+autoplay is what lets iOS Safari (and every
+         other mobile browser's autoplay policy) start the VISUAL immediately
+         with zero user gesture — audio unlock is handled entirely separately,
+         at TAP TO START (see #tap-to-start-btn below), never here. poster is
+         the video's own first frame (assets/video/loading_intro_poster.jpg)
+         so there is never a black flash before the video's own data arrives. -->
+    <!-- DIAGNOSIS ROUND (section 3): root-caused via a minimal isolated
+         Playwright test (not just "the video element exists") that some
+         Chromium builds report canPlayType('video/mp4; codecs="avc1..."')
+         as "" and resolve to networkState=NETWORK_NO_SOURCE / error.code=4
+         (MEDIA_ERR_SRC_NOT_SUPPORTED) for H.264/MP4 specifically — open-
+         source Chromium distributed without the proprietary H.264 license
+         lacks the decoder outright, and some real-world Linux/de-googled
+         Android builds ship the same way. iOS Safari is the opposite case
+         (MP4/H.264 required, WebM unsupported), so MP4 stays the FIRST
+         <source> (tried first) for that audience; WebM/VP9 is added as a
+         second source the browser falls through to whenever H.264 isn't
+         available, rather than silently failing with no source at all. -->
+    <!-- 9TH ROUND (spec section 37): OPENING LOOP VIDEO replaced with the
+         new user-attached content — same dual-source H.264/VP9 pipeline,
+         same duration/resolution as before (8.033s, 1920x864), converted
+         from the attached HEVC/.mov source via this project's own
+         established ffmpeg settings (matching the PREVIOUS loading_intro
+         files' encode quality — see the completion report for exact
+         codec/bitrate evidence). Filenames deliberately kept identical;
+         only the cache-busting ?v= bumped 1->2 so browsers/CDNs fetch the
+         new bytes instead of a cached copy of the old video under the same
+         URL. -->
+    <video id="intro-video" muted playsinline autoplay preload="auto" poster="assets/video/loading_intro_poster.jpg?v=2">
+      <source src="assets/video/loading_intro.mp4?v=2" type="video/mp4">
+      <source src="assets/video/loading_intro.webm?v=2" type="video/webm">
+    </video>
+    <!-- 第12次調整: LOADING-only video, reintroducing the two-video LOADING/
+         OPENING split the BOOT FLOW ROUND (historical)/13TH ROUND had
+         previously consolidated into one — see game.js's showTapToStart
+         Prompt()/initLoadingVideo() for exactly how the two hand off. Sits
+         ON TOP of #intro-video (later in DOM, same full-bleed positioning —
+         see style.css) so it's the ONLY one visible during LOADING; both
+         videos autoplay+loop from boot in parallel (never a src-swap), so
+         the switch to #intro-video at 100% is a plain visibility toggle
+         with no black-frame/stutter (the exact regression the 13TH ROUND's
+         own investigation found with a two-video design that DIDN'T do
+         this — see that round's own comment history). loading progression
+         itself is entirely independent of this video's own duration/loop
+         count (see checkAssetsReady() — video readiness is never part of
+         REQUIRED_IMAGES). #intro-video itself (the OPENING video, above) is
+         completely unmodified by this change. -->
+    <video id="loading-video" muted playsinline autoplay loop preload="auto" poster="assets/video/loading_only_poster.jpg">
+      <source src="assets/video/loading_only.mp4" type="video/mp4">
+      <source src="assets/video/loading_only.webm" type="video/webm">
+    </video>
+    <!-- UI POLISH ROUND: the "DARK OUT 2" brand title is deliberately no
+         longer shown on the LOADING gauge itself — the real intro video
+         already carries the title/atmosphere, and a second, separate text
+         title layered on top of it read as redundant clutter (explicit
+         user request). Progress bar + percent are unchanged/still shown. -->
+    <div id="loading-gauge-wrap">
+      <div id="loading-status">LOADING... <span id="loading-pct">0</span>%</div>
+      <div id="loading-bar-track"><div id="loading-bar-fill"></div></div>
+      <div id="loading-eta">CALCULATING...</div>
+    </div>
+    <!-- BOOT FLOW ROUND: a single, unified LOAD ERROR display — shown ONLY
+         when checkAssetsReady() finds a genuine (not merely slow/pending)
+         required-asset failure, and never alongside TAP TO START (see
+         showLoadError() in game.js: it forces tap-to-start-btn back to
+         hidden the instant it appears, closing off the one path that used
+         to let these two overlap). -->
+    <div id="loading-error-box" hidden>
+      <div id="loading-error-title" data-en="LOAD ERROR" data-ja="読み込みエラー">LOAD ERROR</div>
+      <div id="loading-error-text" data-en="Some required files failed to load. Please check your connection and reload." data-ja="必須ファイルの読み込みに失敗しました。通信環境をご確認の上、再読み込みしてください。">Some required files failed to load. Please check your connection and reload.</div>
+      <button type="button" tabindex="-1" id="loading-reload-btn" data-en="RELOAD" data-ja="再読み込み">RELOAD</button>
+    </div>
+    <!-- BOOT FLOW ROUND: appears ONLY once LOADING genuinely reaches 100%
+         (see the state.assetsReady transition in frame()) — never before.
+         This is the new, sole audio-unlock gesture for the whole app (see
+         handleTapToStart() in game.js); CONTROLLER/TOUCH PANEL selection
+         below no longer needs to double as that gesture, though it still
+         harmlessly retries the same idempotent tryStartBgm() as defense in
+         depth. Deliberately a plain click/pointer target only — never wired
+         into pollGamepad()'s button handling, so a gamepad press alone can
+         never skip past it (spec's own explicit requirement). -->
+    <!-- UI POLISH ROUND: split into a main line (keeps the existing EN/JA
+         lang-toggle behavior, unchanged — applyUiLang() still finds this
+         inner span via its own data-en/data-ja) and a fixed sub-guide line
+         underneath (deliberately NOT lang-toggle-driven — always the same
+         Japanese guide text, per explicit request, regardless of which
+         language the main line is currently showing). The outer <button>
+         stays the single click target; handleTapToStart()'s listener is
+         unchanged (still bound to #tap-to-start-btn itself, which still
+         receives the click regardless of which inner span was tapped). -->
+    <button type="button" tabindex="-1" id="tap-to-start-btn" hidden>
+      <span id="tap-to-start-main" data-en="TAP TO START" data-ja="タップしてスタート">TAP TO START</span>
+      <span id="tap-to-start-sub">画面をタップしてください</span>
+    </button>
+    <!-- 22ND ROUND (real-device report item 11): PC DOWNLOAD — moved here
+         (top-right of the FIRST screen — background loop video + TAP TO
+         START, i.e. this #loading-screen) from #mode-select-screen's own
+         #pc-download-row below the CONTROLLER/TOUCH PANEL choice, per
+         explicit request; referenced ALEXIA's own equivalent top-right
+         "DOWNLOAD PC VERSION" placement/positioning for where this class of
+         control belongs, but NOT its dynamic pointer-type-gated visibility
+         or its separate PC-package build system — this project's existing,
+         already-verified approach (a plain link straight to GitHub's own
+         "download repository as ZIP" endpoint for this exact branch, see
+         the 13TH ROUND's own comment, preserved verbatim below with the
+         SAME href/hint text, not a new URL or package) is kept completely
+         unchanged, only relocated. Sits outside #tap-to-start-btn (a
+         separate sibling element, not nested inside it), so tapping this
+         link can never also trigger handleTapToStart()'s own click
+         listener (scoped to that one button only — see its own comment) —
+         no stopPropagation() needed, unlike ALEXIA's version which nests
+         its button inside a whole-overlay tap-to-unlock listener. Always
+         visible (same as before this round), not gated by device/pointer
+         type, since the ORIGINAL #pc-download-row was never gated either —
+         relocating is not licence to add new conditional-visibility logic
+         nobody asked for. -->
+    <div id="pc-download-row-top">
+      <a id="pc-download-link" href="https://github.com/andre20290810/GAME-GENERATOR/archive/refs/heads/main.zip" data-en="DOWNLOAD FOR PC (ZIP)" data-ja="PC版をダウンロード（ZIP）">DOWNLOAD FOR PC (ZIP)</a>
+      <div id="pc-download-hint" data-en="Unzip, then open index.html in your browser." data-ja="解凍後、index.htmlをブラウザで開いてください">Unzip, then open index.html in your browser.</div>
+    </div>
+  </div>
+
+  <!-- 6TH ROUND PART 7/8/9/10/11/12: replaces the old "TAP TO START"
+       prompt entirely. Shown only once checkAssetsReady() is genuinely
+       true. The two mode buttons are each, in a single gesture, the
+       Audio-unlock gesture AND the gameplay-start trigger AND the touch-UI
+       visibility decision (see handleModeSelect() in game.js) — never a
+       second confirmation step. The store link and language toggle are
+       deliberately separate controls that do neither of those things. -->
+  <div id="mode-select-screen" hidden>
+    <button type="button" tabindex="-1" id="lang-toggle-btn" data-en="日本語へ切り替え" data-ja="SWITCH TO ENGLISH">日本語へ切り替え</button>
+    <div id="mode-select-title">DARK OUT 2</div>
+    <div id="mode-select-subtitle" data-en="CHOOSE HOW TO PLAY" data-ja="操作方法を選んでください">CHOOSE HOW TO PLAY</div>
+    <button type="button" tabindex="-1" id="mode-btn-controller" class="mode-btn" data-en="PLAY WITH WIRELESS CONTROLLER" data-ja="ワイヤレスコントローラーで遊ぶ">PLAY WITH WIRELESS CONTROLLER</button>
+    <button type="button" tabindex="-1" id="mode-btn-touch" class="mode-btn" data-en="PLAY WITH TOUCH CONTROLS" data-ja="タッチ操作で遊ぶ">PLAY WITH TOUCH CONTROLS</button>
+    <div id="controller-store-row">
+      <div id="controller-store-question" data-en="DON'T HAVE A WIRELESS CONTROLLER?" data-ja="ワイヤレスコントローラーをお持ちでないですか?">DON'T HAVE A WIRELESS CONTROLLER?</div>
+      <a id="controller-store-link" href="#" target="_blank" rel="noopener" data-en="GET A WIRELESS CONTROLLER" data-ja="ワイヤレスコントローラーを購入する">GET A WIRELESS CONTROLLER</a>
+    </div>
+    <!-- 22ND ROUND (real-device report item 11): PC DOWNLOAD moved OUT of
+         this screen entirely — see #pc-download-row-top's own comment in
+         #loading-screen above (the new location, top-right of the very
+         first TAP TO START screen) for the full rationale. This screen
+         (TOUCH PANEL / CONTROLLER selection) no longer hosts it. -->
+  </div>
+
+  <!-- Main gameplay BGM ("AFTER THE LIMITS"). loop: this is a continuous
+       gameplay track, expected to keep playing across the whole AUTO MODE
+       sequence, well past a single loop of the song. Playback itself is
+       driven from game.js (tryStartBgm()/togglePauseMenu()) — never
+       autoplay="" here, since browsers require a real user gesture before
+       audio with sound may start. -->
+  <audio id="bgm-audio" src="assets/audio/after_the_limits.mp3" loop preload="auto"></audio>
+
+  <!-- RUN FLOW SYSTEM: ENDING / RESULT BGM ("ENTER INTO ETERNITY Ver.2.0").
+       Deliberately a SEPARATE <audio> element from #bgm-audio above, never
+       looped (plays once through from GAME CLEAR onward) — beginEnding()
+       in game.js pauses #bgm-audio and plays this exactly once (guarded by
+       state.run.endingBgmStarted), and RESULT's own 60-second gate reads
+       this element's real currentTime, never a setTimeout.
+       14TH ROUND (PC LOAD ERROR investigation): preload was "auto", so this
+       4.8MB file was fetched eagerly at page load — never gating the
+       LOADING screen itself (audio never blocks the % gate, see
+       checkAssetsReady()'s own comment), but still competing for the same
+       limited browser connection pool/bandwidth against the ~84MB of
+       REQUIRED images during the exact window real-device PC reports showed
+       as abnormally slow. ENDING is only reachable after a full playthrough
+       (many minutes of lead time), so there is no benefit to fetching it
+       this early — changed to preload="none" so the browser defers the
+       request entirely until beginEnding()'s own .play() call actually
+       needs it, freeing bandwidth for the required images during the
+       critical initial load. -->
+  <audio id="ending-bgm-audio" src="assets/audio/enter_into_eternity.mp3" preload="none"></audio>
+
+  <!-- 28TH ROUND item 7: visible guide for the case where the mode-select
+       tap/press did NOT actually unlock audio (real-device autoplay-policy
+       edge case) or, in CONTROLLER mode, no gamepad button press has been
+       detected yet — see showTapEnableGuideIfNeeded()/hideTapEnableGuide()
+       in game.js for the exact appear/disappear/reappear rules. Hidden by
+       default; never shown at all on the (overwhelmingly common) path where
+       the mode-select gesture itself already unlocked everything. -->
+  <div id="tap-enable-guide" hidden data-en="Tap once to enable audio and controller." data-ja="タップして音声とコントローラーを有効にしてください">Tap once to enable audio and controller.</div>
+
+  <!-- HUD: health / ammo / stealth / theme / enemy HP / FOCUS, kept as static DOM nodes updated via textContent/style only (no per-frame element creation) -->
+  <div id="hud">
+    <div id="hud-top-left">
+      <div id="hp-row">
+        <div id="hp-label">HP</div>
+        <div id="hp-bar-track"><div id="hp-bar-fill"></div></div>
+        <!-- 3-LIFE SYSTEM (spec sections 8-12): simple "x3"-style readout
+             next to the existing single HP gauge — no HUD redesign, no
+             second/third HP bar. Text set by updateHud() in game.js. -->
+        <div id="life-count-readout">&times;3</div>
+      </div>
+      <!-- 9TH ROUND (item 36): ESCAPE MODE's own TIME LIMIT readout — hidden
+           in COMBAT MODE via CSS (body.escape-mode gate), shown only while
+           state.gameMode==='escape'. 12TH ROUND (items 48-49): relabeled
+           SURVIVE MM:SS in red — same underlying timer/CLEAR SEQUENCE, text
+           only. -->
+      <div id="escape-timeleft-readout">SURVIVE <span id="escape-timeleft-value">01:30</span></div>
+    </div>
+    <div id="hud-top-right">
+      <div id="stealth-readout">STEALTH <span id="stealth-state">OFF</span></div>
+    </div>
+    <!-- 4th round PART 23: enemy HP gauge — did not exist before this
+         round (enemy.hp was never wired to any UI or any damage source;
+         see game.js updateBullets()'s own root-cause comment). Name +
+         bar both switch with the current enemy (spawnEnemy()/updateHud()). -->
+    <div id="enemy-hud">
+      <div id="enemy-name">ROID 1</div>
+      <div id="enemy-hp-bar-track"><div id="enemy-hp-bar-fill"></div></div>
+    </div>
+    <!-- 12TH ROUND PART A (spec section 3): dedicated 3-bar HUD for the
+         run's opening 3-simultaneous-DRONE encounter (state.droneWave.
+         simultaneousMode) — #enemy-hud above stays the single-enemy display
+         for every other encounter and is simply hidden while this is shown
+         (see updateHud() in game.js), never repurposed/reused as bar #1, so
+         no other encounter's HUD logic needs to change at all. Hidden by
+         default; each bar is independently non-overlapping. -->
+    <div id="drone-squad-hud" hidden>
+      <div class="drone-squad-row"><div class="drone-squad-name">DRONE 1</div><div class="drone-squad-bar-track"><div id="drone-squad-bar-fill-0" class="drone-squad-bar-fill"></div></div></div>
+      <div class="drone-squad-row"><div class="drone-squad-name">DRONE 2</div><div class="drone-squad-bar-track"><div id="drone-squad-bar-fill-1" class="drone-squad-bar-fill"></div></div></div>
+      <div class="drone-squad-row"><div class="drone-squad-name">DRONE 3</div><div class="drone-squad-bar-track"><div id="drone-squad-bar-fill-2" class="drone-squad-bar-fill"></div></div></div>
+    </div>
+    <!-- 4th round PART 17: FOCUS gauge (LB / AUTO AIM resource). -->
+    <div id="focus-hud">
+      <div id="focus-label">FOCUS</div>
+      <div id="focus-bar-track"><div id="focus-bar-fill"></div></div>
+    </div>
+    <!-- 10TH ROUND (items 25-27): AMMO now lives in exactly ONE place —
+         directly under FOCUS (the old top-right #ammo-readout and the 9TH
+         ROUND under-HP readout are both removed). current/MAGAZINE
+         CAPACITY (not the old RESERVE-POOL pairing) is what matters for
+         moment-to-moment play; #ammo-hud-reserve-total surfaces the
+         internal reserve pool too since it still exists and appears in
+         DEBUG. -->
+    <div id="ammo-hud">
+      <div id="ammo-hud-readout">AMMO <span id="ammo-hud-count">12</span>/<span id="ammo-hud-mag">12</span></div>
+      <div id="ammo-hud-reloading" hidden>RELOADING...</div>
+    </div>
+    <div id="hud-center-warning" hidden></div>
+    <!-- RUN FLOW SYSTEM: persistent "distance to the exit" readout (spec
+         section 12) — shown from game start through ESCAPE_COMPLETE,
+         updated by updateHud() in game.js. Deliberately NOT a "STAGE 1/5"
+         counter, per the explicit spec instruction. -->
+    <div id="distance-readout">EXIT <span id="distance-readout-value">15000</span>m</div>
+    <!-- 12TH ROUND PART A (spec sections 5-6): "WARNING" is now a HUD
+         element paired with EXIT (directly below it), not text drawn at
+         each falling debris piece's own world position — see
+         renderCollapseObstacles() in game.js, whose old per-debris
+         'WARNING!!' draw is removed. Shown/hidden by updateHud() from a
+         single boolean (ANY debris currently in its pre-landing warning
+         window), so at most ONE "WARNING" is ever visible no matter how
+         many debris pieces are active simultaneously. -->
+    <div id="exit-warning-readout" hidden>WARNING</div>
+  </div>
+  <!-- 20TH ROUND: #theme-label moved OUT of #hud (was a child) so R20's
+       `body.ending-active #hud { display:none; }` rule (see style.css)
+       cannot ever collapse it. ROOT CAUSE this fixed: renderEscapePlayer()'s
+       label-overlap clamp (computeEscapePlayerRectClamped(), see game.js)
+       and R19's own GABRIEL/ADAM COMBAT approach-border clamp both read
+       themeLabelEl.getBoundingClientRect().top LIVE every frame — a
+       display:none ancestor collapses that rect to all-zeros, which pushed
+       the ESCAPE player's clamped Y far off-screen (measured dy=-183px on a
+       390px-tall viewport) the instant #hud (and therefore #theme-label
+       inside it) went display:none for ENDING. Moving it to a sibling
+       position, still directly after #hud in the DOM (same visual spot:
+       #hud itself uses inset:0, so a position:absolute descendant of it and
+       an identically-positioned sibling render identically — verified via
+       screenshot), fixes this without touching either clamp function, and
+       incidentally also means the stage-name label stays visible through
+       ENDING (harmless ambient text, not named in this round's hide list —
+       see this round's report for the visual read). -->
+  <div id="theme-label" class="hud-bottom-center">LAB / EXPERIMENT AREA</div>
+
+  <!-- RUN FLOW SYSTEM: shared short banner reused across every transition
+       phase (COMBAT_INTRO's enemy-name/BATTLE, EVACUATION_WARNING's
+       WARNING/EVACUATE text, ESCAPE_COMPLETE, GAME_OVER) — a single
+       reusable DOM overlay rather than one-off elements per message, shown/
+       hidden and re-texted from game.js (showRunBanner()/hideRunBanner()). -->
+  <div id="run-flow-banner" hidden>
+    <div id="run-flow-banner-title"></div>
+    <div id="run-flow-banner-sub"></div>
+  </div>
+
+  <!-- 19TH ROUND (spec sections 10-13, 37): SKIP button — investigation
+       found NO pre-existing SKIP feature anywhere in the codebase (no DOM
+       element, no game.js logic, no unlock-timer distinct from the 60s
+       RESULT gate below). Per the round's own explicit instruction not to
+       invent a new arbitrary seconds-based unlock value
+       ("今回は新しい秒数指定ではない"), this new button is available
+       immediately once ENDING begins (no added delay) and simply fires the
+       SAME transition-to-RESULT code the 60s gate itself calls (see
+       updateEndingPhase()'s own code and this button's click handler in
+       game.js) — it does not change the 60s gate's own timing/logic at all,
+       it only lets the player reach that exact same RESULT state sooner by
+       explicit choice. Hidden again the instant RESULT begins (nothing left
+       to skip once RESULT/QUIT/ARTIST PAGE are already showing). Positioned
+       bottom-right, clear of PAUSE (top-center) and the gameplay HUD
+       (top-right) — see style.css's own comment for the exact offsets. -->
+  <button type="button" tabindex="-1" id="ending-skip-btn" hidden>SKIP</button>
+
+  <!-- 21ST ROUND (real-device report item 3): the ENDING scene (before
+       RESULT appears) had no text at all — real-device feedback called this
+       stretch "演出面で少し寂しい". Added a bottom-anchored, sequential
+       line-by-line fade-in message, timed against the ENDING BGM's OWN real
+       playback progress (endingBgmAudioEl.currentTime, read via
+       updateEndingPhase()'s existing `played` variable — the SAME value
+       already driving the 60s RESULT gate, not a separate real-time clock),
+       per the round's own explicit "ENDING曲が流れている時間そのものを演出
+       時間として活用してください". The last line is EXACTLY "Thank you for
+       playing" (never "Thank you for your playing" — explicit round
+       instruction) — a deliberately separate element from the PRE-EXISTING
+       #result-thanks "THANK YOU FOR PLAYING!!" banner below, which lives on
+       the RESULT screen (a later, distinct beat per the round's own stated
+       priority order ENDING映像・音楽→ENDINGメッセージ→Thank you for
+       playing→RESULT→QUIT/ARTIST PAGE) and is completely untouched this
+       round. Hidden again the instant RESULT begins (see showResultScreen()
+       in game.js) so it never visually overlaps #result-thanks/#result-
+       panel once RESULT layers on top of the still-playing ENDING scene. -->
+  <div id="ending-message" hidden aria-hidden="true">
+    <div class="ending-line">You made it out alive.</div>
+    <div class="ending-line">The engine goes quiet.</div>
+    <div class="ending-line">Until next time.</div>
+    <div class="ending-line ending-line--thanks">Thank you for playing</div>
+  </div>
+
+  <!-- RUN FLOW SYSTEM: RESULT screen — shown as a UI layer on top of the
+       still-rendering/still-playing ENDING scene (canvas + ending BGM both
+       keep going underneath, per spec addendum section 5). Gamepad-
+       navigable via the SAME focus-index + up/down-edge +
+       .gamepad-focused pattern #mode-select-screen already uses (see
+       updateResultFocusUI()/pollGamepad()'s own RESULT branch in game.js)
+       — no second parallel input scheme invented. ARTIST PAGE is a real
+       <a> (href="#" placeholder, matching #controller-store-link's own
+       existing precedent) rather than a fabricated URL.
+       19TH ROUND (spec sections 8-9, 36): #result-thanks (THANK YOU FOR
+       PLAYING) moved OUT of the centered #result-panel flex column into its
+       own sibling element, absolutely positioned at the BOTTOM of
+       #result-screen with a safe margin above the true screen edge (see
+       style.css) — previously it sat inline between RANK and QUIT/ARTIST
+       PAGE, i.e. vertically centered with the rest of the panel, not "画面
+       下部" as spec asks. Kept as a sibling (not nested inside
+       #result-panel) specifically so its position is independent of however
+       tall the stat-row list above happens to be. -->
+  <div id="result-screen" hidden>
+    <div id="result-overlay-dim"></div>
+    <div id="result-panel">
+      <div id="result-title">RESULTS</div>
+      <!-- 7TH ROUND 4th sub-part (spec section 17): RANK is now CLEAR TIME +
+           CONTINUE COUNT, not SCORE — both are now shown alongside RANK so
+           the number actually driving the rank is visible, not hidden
+           behind a score that no longer determines it. SCORE itself is
+           kept on-screen (harmless, still genuinely tracked) rather than
+           removed. -->
+      <div class="result-stat-row">CLEAR TIME <span id="result-time-value">00:00</span></div>
+      <div class="result-stat-row">CONTINUE <span id="result-continue-value">0</span></div>
+      <div class="result-stat-row">SCORE <span id="result-score-value">0</span></div>
+      <div class="result-stat-row">RANK <span id="result-rank-value">D</span></div>
+      <!-- 21ST ROUND (real-device report item 4): QUIT/ARTIST PAGE were
+           reading as generic full-width "UI buttons", too prominent for a
+           closing screen — real-device feedback specifically named these
+           two (not GAME OVER's own CONTINUE/QUIT, a different screen that
+           still uses .result-btn unmodified below). Wrapped in their own
+           row (#result-nav-row) so ITS OWN gap can be tightened without
+           touching #result-panel's gap (which also spaces the stat rows
+           above, untouched). Sizing/restyling itself lives in style.css,
+           scoped to these two IDs specifically — see that comment for why
+           .result-btn/#gameover-continue-btn/#gameover-quit-btn are
+           unaffected. QUIT keeps its own existing click handler (game.js) —
+           only appearance changed there, not behavior/gamepad-focus wiring
+           (.result-btn.gamepad-focused still applies to both, since the
+           class itself is untouched).
+           22ND ROUND (real-device report item 3): ARTIST PAGE's href is now
+           the real, explicitly-supplied TuneCore artist URL (no longer the
+           href="#" placeholder) — root cause of "QUITと同じ挙動になる" was
+           that a real <a target="_blank" href="#"> with no e.preventDefault()
+           anywhere still runs the BROWSER's own native anchor navigation
+           (to "#", in a new tab per target="_blank") alongside game.js's own
+           click handler, which itself was a no-op against the placeholder
+           (see activateResultFocusedButton()'s own `href !== '#'` guard) —
+           on a real device that native navigation opened what looked like a
+           fresh copy of the game (TAP TO START again), reading exactly like
+           QUIT even though no QUIT/reload code ever ran. Fixed at both ends:
+           this real href lets the anchor's OWN native click/target=_blank
+           behavior do the actual navigation correctly (same "set a real
+           href, let the browser handle it" pattern this file's own
+           #controller-store-link already establishes for CONTROLLER_STORE_
+           URL — see its comment), and game.js's click listener no longer
+           also calls activateResultFocusedButton() (which would otherwise
+           open a SECOND redundant tab) — see that listener's own comment. -->
+      <div id="result-nav-row">
+        <button type="button" tabindex="-1" id="result-quit-btn" class="result-btn result-nav-btn">QUIT</button>
+        <a id="result-artist-btn" class="result-btn result-nav-btn result-nav-btn--link" href="https://www.tunecore.co.jp/artists?id=1140292" target="_blank" rel="noopener">ARTIST PAGE</a>
+      </div>
+    </div>
+    <div id="result-thanks">THANK YOU FOR PLAYING!!</div>
+  </div>
+
+  <!-- 7TH ROUND 4th sub-part (spec sections 13-15): GAME OVER screen — a
+       new interactive overlay (previously GAME OVER auto-advanced straight
+       to RESULT after 1500ms with no player choice at all). Mirrors
+       #result-screen's own structure/CSS classes exactly (.result-btn,
+       .result-stat-row, .gamepad-focused) rather than inventing a second
+       visual language. CONTINUE is hidden/disabled by game.js when the
+       death happened in ESCAPE mode (spec section 15: ESCAPE death's
+       CONTINUE semantics are explicitly unresolved this round — see the
+       completion report's STOP item), leaving only QUIT in that case. -->
+  <div id="gameover-screen" hidden>
+    <div id="gameover-overlay-dim"></div>
+    <div id="gameover-panel">
+      <div id="gameover-title">GAME OVER</div>
+      <div class="result-stat-row" id="gameover-continue-row">CONTINUE COUNT <span id="gameover-continue-count-value">0</span></div>
+      <button type="button" tabindex="-1" id="gameover-continue-btn" class="result-btn">CONTINUE</button>
+      <button type="button" tabindex="-1" id="gameover-quit-btn" class="result-btn">QUIT</button>
+    </div>
+  </div>
+
+  <!-- 4th round: PAUSE button — deliberately OUTSIDE #touch-controls so it
+       stays visible/usable even while touch controls are hidden (spec:
+       "PAUSEボタン等、ゲーム進行上必要な最低限のUIまで消さないよう"). -->
+  <button type="button" tabindex="-1" id="pause-btn">PAUSE</button>
+
+  <!-- 4th round PART 6/7: PAUSE menu overlay — TOUCH CONTROLS ON/OFF toggle.
+       7TH ROUND PART 11: CONTROLLER AIM SENSITIVITY (LOW/NORMAL/HIGH) added
+       below it — CONTROLLER-only (see controllerAimSensitivity in game.js),
+       TOUCH AIM is managed independently and never reads this setting.
+       12TH ROUND (items 1-10): PAUSE MENU becomes the single home for every
+       dev/test control that previously sat directly on the normal play
+       screen — ENEMY SELECT/AUTO MODE, STAGE TYPE, GAME MODE, DEBUG
+       DISPLAY ON/OFF, COPY DEBUG. Every element below (#theme-switch/
+       #gamemode-switch/#enemy-switch/#r10-debug-panel's own COPY DEBUG
+       button) is the SAME node/id/click-handler that existed before this
+       round — only their DOM location + CSS positioning moved (see
+       style.css); no logic was duplicated or reimplemented. -->
+  <div id="pause-menu" hidden>
+    <div id="pause-panel">
+      <div id="pause-title">PAUSE</div>
+      <!-- 13TH ROUND (spec sections 43-48): PLAYER LIFE — placed above TOUCH
+           CONTROLS per explicit spec ("TOUCH CONTROL ON/OFFより上へ配置").
+           INFINITE blocks normal-damage HP loss via state.player.infiniteLife
+           (see setPlayerLifeMode() in game.js) rather than a huge HP number.
+           22ND ROUND (real-device report item 10): "デフォルトLIFEを300に"
+           — this first tier's value/label reverted 500->300 (see game.js's
+           PLAYER_MAX_HP declaration comment for why 300, not a new guess);
+           still the default/active tier, still first in the row. -->
+      <div class="pause-menu-label">PLAYER LIFE</div>
+      <div id="player-life-row">
+        <button type="button" tabindex="-1" data-life="300" class="pause-menu-btn player-life-btn active">300</button>
+        <button type="button" tabindex="-1" data-life="1000" class="pause-menu-btn player-life-btn">1000</button>
+        <button type="button" tabindex="-1" data-life="2000" class="pause-menu-btn player-life-btn">2000</button>
+        <button type="button" tabindex="-1" data-life="infinite" class="pause-menu-btn player-life-btn">INFINITE</button>
+      </div>
+
+      <button type="button" tabindex="-1" id="touch-controls-toggle" class="pause-menu-btn">TOUCH CONTROLS : OFF</button>
+      <!-- 13TH ROUND (spec sections 19-24): replaced the old 3-button SLOW/
+           STANDARD/FAST row with a real horizontal slider + tick marks, per
+           explicit real-device report that the button-only UI wasn't
+           reading as the requested "目盛り" presentation. The underlying
+           storage/apply mechanism (controllerAimSensitivity in game.js,
+           read fresh every frame, applied identically to both LIGHT and
+           CROSSHAIR — see that variable's own comment) is completely
+           unchanged; only this control surface changed. Native <datalist>
+           ticks (list="aim-sens-ticks") give the "multiple visible steps,
+           not just 3 points" requirement without hand-drawn tick markup.
+           15TH ROUND (real-device report, spec sections 16-18/33-35):
+           min/max/default range redesigned entirely around real edge-to-
+           edge screen-crossing TIME rather than arbitrary multipliers — the
+           OLD range (0.30-1.00) let even its own minimum cross the full
+           screen width in ~0.82 real seconds at full stick deflection, far
+           too fast for precision aiming (confirmed by direct measurement,
+           see AIM_SENSITIVITY_PRESETS's own comment in game.js). New range
+           0.06 (LOW, ~4.1s edge-to-edge — genuine precision) to 0.60
+           (HIGH, ~0.41s — fast snap-turn), SLOW/STANDARD/FAST preset
+           VALUES (0.06/0.20/0.60, see AIM_SENSITIVITY_PRESETS in game.js)
+           sitting on this range as tick positions, same as before. -->
+      <div id="aim-sens-label" class="pause-menu-label">CONTROLLER AIM SENSITIVITY</div>
+      <div id="aim-sens-slider-row">
+        <span class="aim-sens-edge-label">SLOW</span>
+        <input type="range" tabindex="-1" id="aim-sens-slider" min="0.06" max="0.60" step="0.01" list="aim-sens-ticks">
+        <span class="aim-sens-edge-label">FAST</span>
+      </div>
+      <datalist id="aim-sens-ticks">
+        <option value="0.06"></option>
+        <option value="0.10"></option>
+        <option value="0.14"></option>
+        <option value="0.18"></option>
+        <option value="0.20"></option>
+        <option value="0.22"></option>
+        <option value="0.26"></option>
+        <option value="0.30"></option>
+        <option value="0.34"></option>
+        <option value="0.38"></option>
+        <option value="0.42"></option>
+        <option value="0.46"></option>
+        <option value="0.50"></option>
+        <option value="0.54"></option>
+        <option value="0.60"></option>
+      </datalist>
+
+      <div class="pause-menu-label">STAGE TYPE</div>
+      <div id="theme-switch">
+        <button type="button" tabindex="-1" data-theme="lab" class="theme-btn active">LAB</button>
+        <button type="button" tabindex="-1" data-theme="armored" class="theme-btn">ARMORED</button>
+        <button type="button" tabindex="-1" data-theme="escape" class="theme-btn">ESCAPE</button>
+      </div>
+
+      <div class="pause-menu-label">GAME MODE</div>
+      <div id="gamemode-switch">
+        <button type="button" tabindex="-1" data-gamemode="combat" class="gamemode-btn active">COMBAT MODE</button>
+        <button type="button" tabindex="-1" data-gamemode="escape" class="gamemode-btn">ESCAPE MODE</button>
+      </div>
+
+      <div class="pause-menu-label">ENEMY SELECT / AUTO MODE</div>
+      <!-- 13TH ROUND (spec section 18): real-device report — the old single
+           flex-wrap row (7 variable-width buttons) wrapped unevenly (ADAM
+           alone, off-center, on its own row-2). Restructured into two
+           explicit row divs so row 2 (GABRIEL/ADAM SPHERE/ADAM) is always
+           exactly those 3 buttons, evenly spaced — see #enemy-switch-row2's
+           own CSS. Selection values/data-enemy attributes/event wiring are
+           completely unchanged — this is a pure layout restructure. -->
+      <div id="enemy-switch">
+        <div id="enemy-switch-row1">
+          <button type="button" tabindex="-1" data-enemy="auto" class="enemy-btn active">AUTO</button>
+          <button type="button" tabindex="-1" data-enemy="drone" class="enemy-btn">DRONE</button>
+          <button type="button" tabindex="-1" data-enemy="roid1" class="enemy-btn">ROID 1</button>
+          <button type="button" tabindex="-1" data-enemy="roid2" class="enemy-btn">ROID 2</button>
+        </div>
+        <div id="enemy-switch-row2">
+          <button type="button" tabindex="-1" data-enemy="gabriel" class="enemy-btn">GABRIEL</button>
+          <button type="button" tabindex="-1" data-enemy="adamSphere" class="enemy-btn">ADAM SPHERE</button>
+          <button type="button" tabindex="-1" data-enemy="adam" class="enemy-btn">ADAM</button>
+        </div>
+      </div>
+
+      <div class="pause-menu-label">DEBUG</div>
+      <button type="button" tabindex="-1" id="pause-debug-toggle" class="pause-menu-btn">DEBUG DISPLAY : OFF</button>
+      <div id="r10-dbg-copy-row">
+        <button type="button" tabindex="-1" id="r10-dbg-copy-btn" class="pause-menu-btn">COPY DEBUG</button>
+        <span id="r10-dbg-copy-status"></span>
+      </div>
+
+      <button type="button" tabindex="-1" id="pause-resume-btn" class="pause-menu-btn">RESUME</button>
+      <!-- 13TH ROUND (spec sections 38-41): ENDING test button, directly
+           below RESUME per explicit spec. Connects to the SAME real
+           beginRunEnding()/ENDING/RESULT flow a genuine game-clear uses —
+           no separate/fake ENDING implementation (see its click handler in
+           game.js).
+           17TH ROUND: real-device report — ENDING BGM sometimes started
+           mid-game during ordinary PAUSE/RESUME cycling. The play()-time
+           guards themselves were re-verified correct (10-cycle Playwright
+           QA: zero unintended play() calls — see game.js's own comment on
+           the phase guard), but this button sits directly below RESUME with
+           identical styling and a plain "ENDING" label — on a real touch
+           screen, a mis-tap landing just south of RESUME (exactly the kind
+           of repeated open/close/open/close operation the report
+           describes) can land on this REAL, always-live button instead,
+           which genuinely does start ENDING/its BGM by design (this is a
+           legitimate trigger path, not a bug — see §25 of the round spec).
+           Given the spec explicitly requires this button's own function to
+           keep working unchanged (a direct tap must still reach ENDING/
+           RESULT for QA), the fix here is UI-only: extra spacing +
+           an unambiguous "(TEST)" label so it reads as a deliberate
+           developer action, not a normal menu item — never a hidden/
+           removed/confirm-gated button, so no existing QA automation that
+           clicks it directly is affected. -->
+      <button type="button" tabindex="-1" id="pause-ending-btn" class="pause-menu-btn pause-menu-btn-ending-test">ENDING (TEST)</button>
+    </div>
+  </div>
+
+  <!-- Debug / FPS panel — 12TH ROUND (item 5): no longer always-visible on
+       the normal play screen; shown only while state.debugPanelVisible
+       (see the DEBUG DISPLAY toggle above), same as #r10-debug-panel. -->
+  <div id="debug-panel" hidden>
+    <div>FPS <span id="dbg-fps">--</span></div>
+    <div>FRAME <span id="dbg-frametime">--</span>ms</div>
+    <div>DPR <span id="dbg-dpr">--</span></div>
+    <div>GAMEPAD <span id="dbg-gamepad">NONE</span></div>
+    <div>STATE <span id="dbg-state">--</span></div>
+  </div>
+
+  <!-- 8TH ROUND: real-device DEBUG MODE panel. 12TH ROUND (items 6-9):
+       visibility now follows state.debugPanelVisible (toggled from PAUSE
+       MENU's DEBUG DISPLAY button above, on ANY URL) instead of only
+       ?debug=1 — see DEBUG_MODE/DEBUG_URL_FLAG in game.js. `hidden` here is
+       still the default. Deliberately compact/small (own scroll region,
+       small font) so it cannot obstruct mobile-landscape gameplay;
+       positioned bottom-left. Its own COPY DEBUG button now lives in the
+       PAUSE MENU instead (moved above) — this element keeps every OTHER
+       field (GAME/PLAYER/AMMO/FIRE/SHOT/ENEMY/INPUT/EVENT LOG). -->
+  <div id="r10-debug-panel" hidden>
+    <div id="r10-dbg-title">DEBUG</div>
+    <div id="r10-dbg-game"></div>
+    <div id="r10-dbg-player"></div>
+    <div id="r10-dbg-ammo"></div>
+    <div id="r10-dbg-fire"></div>
+    <div id="r10-dbg-shot"></div>
+    <div id="r10-dbg-enemy"></div>
+    <!-- 30TH ROUND item 29: FOCUS/ESCAPE DECOY/DRONE WAVE field groups —
+         all new this round (GAMEPAD/INPUT/FIRE above are pre-existing). -->
+    <div id="r10-dbg-focus"></div>
+    <div id="r10-dbg-decoy"></div>
+    <div id="r10-dbg-dronewave"></div>
+    <div id="r10-dbg-input"></div>
+    <div id="r10-dbg-log-title">EVENT LOG</div>
+    <div id="r10-dbg-log"></div>
+  </div>
+
+  <!-- On-screen touch fallback controls (for testing without a controller).
+       4th round PART 6: default HIDDEN (see game.js setTouchControlsVisible()
+       / style.css's default-hidden rule) — toggled ON/OFF from PAUSE only.
+       The touch input implementation itself (makeVirtualStick()/
+       wireButton() listeners) is completely unchanged; only visibility. -->
+  <!-- 7TH ROUND 4th sub-part (spec sections 19-28): TOUCH UI redesign.
+       GAMEPAD mapping (pollGamepad()) is completely untouched — this block
+       only changes touch DOM/CSS/pointer-handler input routing. Removed
+       controls (STEALTH, N-DASH/S-STEP/W-DASH/E-DASH, the old separate
+       right-side AIM stick, the old FIRE button, W-DECOY/E-DECOY) have NO
+       surviving DOM/CSS/handler — see game.js's touch-input wiring for the
+       matching removals. -->
+  <div id="touch-controls">
+    <div id="touch-move-pad" class="touch-pad">
+      <div class="touch-pad-label">MOVE</div>
+      <div class="touch-stick"></div>
+    </div>
+    <!-- Unified AIM+LIGHT stick — was the separate LIGHT stick; now drives
+         BOTH AIM and LIGHT/SPOTLIGHT together (see game.js's frame() input
+         merge, which now feeds this single stick's x/y into both
+         state.input.aimX/Y and lightX/Y, mirroring how GAMEPAD's right
+         stick already drives both identically). The OLD separate right-side
+         AIM stick (#touch-aim-pad) is removed entirely — #touch-dash below
+         now occupies its former screen position. -->
+    <div id="touch-light-pad" class="touch-pad">
+      <div class="touch-pad-label">AIM</div>
+      <div class="touch-stick"></div>
+    </div>
+    <!-- 16TH ROUND (spec sections 12-22, 34-35, 49-54): the OLD 11TH-round
+         layout ("DASH-centered semicircle split into 3") was only ever a
+         POSITION concept — 3 independently-shaped rounded-rect buttons
+         placed at cardinal offsets around a round DASH button, not a real
+         single semicircle panel — real-device feedback said it still read
+         as "DASH is the big center button" with SHOT off to the side.
+         Redesigned into a genuine ONE-PIECE semicircle control cluster per
+         mode: a large center circle (COMBAT=SHOT, ESCAPE=DASH — the role
+         that swaps, per spec section 13) with an SVG semicircle panel
+         behind/around it, split into 3 equal 60° pie-wedge segments (LEFT/
+         TOP/RIGHT) whose VISUAL shape and TOUCH hit area are the same SVG
+         <path> (shape-accurate hit-testing, not a bounding rectangle —
+         spec section 16/50's own explicit requirement), each wedge tapping
+         directly (no separate invisible overlay). Two separate wrap groups
+         (COMBAT / ESCAPE) share an identical geometry (same radii/angles/
+         center anchor point, spec section 43's "同じデザイン言語") and swap
+         visibility via the SAME existing body.escape-mode mechanism every
+         other COMBAT/ESCAPE-only element already uses — see style.css's own
+         #touch-combat-fan-wrap/#touch-escape-fan-wrap rules.
+         18TH ROUND (spec sections 27-48): full CIRCLE cluster replaces the
+         old upper-semicircle-only fan — upper half stays a 2-way split
+         (FOCUS/RELOAD in COMBAT, EAST SHADOW/WEST SHADOW in ESCAPE, same
+         wedge ids as before, only repositioned/relabeled), the lower half
+         is NEW (COMBAT: 3-way WEST/SOUTH/EAST DASH; ESCAPE: 2-way WEST/EAST
+         DASH). JUMP's wedge is removed entirely from this cluster (spec
+         section 39 — the action itself/its gamepad mapping is untouched,
+         see game.js). The old single ambiguous DASH wedge
+         (#touch-combat-dash, which read the MOVE stick's current direction)
+         is removed too — each new direction wedge below dispatches its OWN
+         explicit direction directly (see game.js's handleTouchWestDash()/
+         handleTouchSouthDash()/handleTouchEastDash()), never inferring from
+         MOVE stick input. ESCAPE's center #touch-dash keeps its EXISTING
+         MOVE-stick-direction-reading behavior unchanged (spec section 36's
+         own explicit "既存DASH actionを維持") — only the two new lower
+         wedges are unambiguous. -->
+    <div id="touch-combat-fan-wrap" class="touch-fan-wrap">
+      <svg id="touch-combat-fan" class="touch-fan-svg" viewBox="-150 -150 300 300" preserveAspectRatio="xMidYMid meet">
+        <path id="touch-focus" class="touch-fan-wedge" d="M0,-58 L0,-140 A140,140 0 0,0 -140,0 L-58,0 A58,58 0 0,1 0,-58 Z"></path>
+        <path id="touch-reload" class="touch-fan-wedge" d="M58,0 L140,0 A140,140 0 0,0 0,-140 L0,-58 A58,58 0 0,1 58,0 Z"></path>
+        <path id="touch-combat-west-dash" class="touch-fan-wedge" d="M-58,0 L-140,0 A140,140 0 0,0 -70,121.24 L-29,50.23 A58,58 0 0,1 -58,0 Z"></path>
+        <path id="touch-combat-south-dash" class="touch-fan-wedge" d="M-29,50.23 L-70,121.24 A140,140 0 0,0 70,121.24 L29,50.23 A58,58 0 0,1 -29,50.23 Z"></path>
+        <path id="touch-combat-east-dash" class="touch-fan-wedge" d="M29,50.23 L70,121.24 A140,140 0 0,0 140,0 L58,0 A58,58 0 0,1 29,50.23 Z"></path>
+        <line class="touch-fan-divider" x1="-58" y1="0" x2="-140" y2="0"></line>
+        <line class="touch-fan-divider" x1="0" y1="-58" x2="0" y2="-140"></line>
+        <line class="touch-fan-divider" x1="58" y1="0" x2="140" y2="0"></line>
+        <line class="touch-fan-divider" x1="-29" y1="50.23" x2="-70" y2="121.24"></line>
+        <line class="touch-fan-divider" x1="29" y1="50.23" x2="70" y2="121.24"></line>
+        <text class="touch-fan-label" x="-67" y="-67">FOCUS</text>
+        <text class="touch-fan-label" x="67" y="-67">RELOAD</text>
+        <text class="touch-fan-label" x="-82" y="44">WEST<tspan x="-82" dy="11">DASH</tspan></text>
+        <text class="touch-fan-label" x="0" y="91">SOUTH<tspan x="0" dy="11">DASH</tspan></text>
+        <text class="touch-fan-label" x="82" y="44">EAST<tspan x="82" dy="11">DASH</tspan></text>
+      </svg>
+      <button type="button" tabindex="-1" id="touch-shot" class="touch-btn-round touch-fan-center">SHOT</button>
+    </div>
+    <div id="touch-escape-fan-wrap" class="touch-fan-wrap touch-escape-only">
+      <svg id="touch-escape-fan" class="touch-fan-svg" viewBox="-150 -150 300 300" preserveAspectRatio="xMidYMid meet">
+        <path id="touch-shadow-east" class="touch-fan-wedge" d="M0,-58 L0,-140 A140,140 0 0,0 -140,0 L-58,0 A58,58 0 0,1 0,-58 Z"></path>
+        <path id="touch-shadow-west" class="touch-fan-wedge" d="M58,0 L140,0 A140,140 0 0,0 0,-140 L0,-58 A58,58 0 0,1 58,0 Z"></path>
+        <path id="touch-escape-west-dash" class="touch-fan-wedge" d="M-58,0 L-140,0 A140,140 0 0,0 0,140 L0,58 A58,58 0 0,1 -58,0 Z"></path>
+        <path id="touch-escape-east-dash" class="touch-fan-wedge" d="M0,58 L0,140 A140,140 0 0,0 140,0 L58,0 A58,58 0 0,1 0,58 Z"></path>
+        <line class="touch-fan-divider" x1="-58" y1="0" x2="-140" y2="0"></line>
+        <line class="touch-fan-divider" x1="0" y1="-58" x2="0" y2="-140"></line>
+        <line class="touch-fan-divider" x1="58" y1="0" x2="140" y2="0"></line>
+        <line class="touch-fan-divider" x1="0" y1="58" x2="0" y2="140"></line>
+        <text class="touch-fan-label" x="-67" y="-67">EAST<tspan x="-67" dy="11">SHADOW</tspan></text>
+        <text class="touch-fan-label" x="67" y="-67">WEST<tspan x="67" dy="11">SHADOW</tspan></text>
+        <text class="touch-fan-label" x="-67" y="67">WEST<tspan x="-67" dy="11">DASH</tspan></text>
+        <text class="touch-fan-label" x="67" y="67">EAST<tspan x="67" dy="11">DASH</tspan></text>
+      </svg>
+      <button type="button" tabindex="-1" id="touch-dash" class="touch-btn-round touch-fan-center">DASH</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- DARK OUT 2 ROUND: bumped v=2->3 — this had not moved since commit
+     b67674a despite every game.js change since (including R24's 3-life/
+     FOCUS work and both later bug-fix rounds' ADAM/sniper/ENDING fixes),
+     so a browser or the GitHub Pages CDN (see CNAME) that already cached
+     game.js?v=2 kept serving pre-fix code indefinitely — the concrete,
+     provable explanation for "fixed and verified in code, still
+     reproduces on the real device" (see this round's ADAM investigation). -->
+<!-- GGP v0.1: game.js?v=4 (bumped for the GGP config hooks) is loaded by
+     ggp/ggp-boot.js once game.json has been read — see that file. -->
+<script src="ggp/ggp-boot.js?v=1"></script>
+</body>
+</html>

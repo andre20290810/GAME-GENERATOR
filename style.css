@@ -1,0 +1,1721 @@
+:root {
+  color-scheme: dark;
+}
+
+/* 21ST ROUND (real-device report): long-pressing a touch button (SHOT most
+   of all, since holding it down is the normal way to keep firing) triggered
+   the OS/browser's own text-selection — highlight, "Copy"/"Paste" callout,
+   drag-to-select — because nothing anywhere in this file suppressed
+   user-select/touch-callout; only touch-action (a separate property that
+   blocks scroll/zoom gestures, not text-selection at all) was applied in a
+   few places. Applied globally (every element, not just #touch-controls'
+   own buttons) since this is a full-screen game with no text content that
+   should ever be selectable during play — the ONE deliberate exception
+   (the ?debug=1 DEBUG panel's own log/field text, meant to be copyable) is
+   a real class/id selector (see #r10-dbg-game/#r10-dbg-log etc. below,
+   already existing) which naturally wins over this universal `*` rule
+   under normal CSS specificity (any class/id beats a bare `*`), so that
+   panel's own copy-to-clipboard behavior is completely unaffected.
+   -webkit-touch-callout:none additionally suppresses iOS Safari's own
+   long-press image/link callout menu, which user-select alone does not
+   cover. */
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 12TH ROUND (items 46-49): root-caused the "white door frame" reported
+   during DASH — no such effect exists anywhere in game.js's Canvas
+   rendering (confirmed via direct code search and live DASH screenshots,
+   COMBAT and ESCAPE, neither showed any rectangle). The real cause is the
+   browser's own default focus ring: `<button>` touch controls (DASH
+   buttons most of all, since they're tapped rapidly/repeatedly) receive
+   native focus on tap, and mobile Safari/WebKit's default focus outline
+   renders as a white rectangular box around the button — exactly matching
+   the reported "白い長方形フレーム" and confirmed by this session's own
+   probe (outlineColor computed as rgb(255,255,255) on these buttons even
+   though headless Chromium's own click() doesn't reproduce the visible
+   ring the way a real touchstart does). -webkit-tap-highlight-color above
+   only suppresses WebKit's tap-flash, a separate effect from this. Scoped
+   to `button` globally since every gameplay control (DASH, FIRE, PAUSE
+   MENU entries, etc.) is a <button> — never affects DASH's own distance/
+   timing/blink logic, only this unrelated browser-chrome artifact. */
+button { outline: none; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  color: #cfd8dc;
+}
+
+#rotate-notice {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #05070a;
+  color: #9fb0bd;
+  text-align: center;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+}
+.rotate-icon { font-size: 40px; }
+.rotate-sub { font-size: 11px; opacity: 0.55; letter-spacing: 0.15em; }
+
+/* Landscape gate: show rotate notice only when the viewport is actually
+   portrait-shaped (covers desktop resize too, not just orientation API). */
+@media (max-aspect-ratio: 1/1) {
+  #rotate-notice { display: flex; }
+  #game-root { display: none !important; }
+}
+
+#game-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+/* 5TH ROUND PART 17/18/19/20: real asset-readiness LOADING gate.
+   6TH ROUND: title restyled to a classic/heavy SERIF look (spec section
+   5 — white, no neon/cyber glow, no gradients) using only system serif
+   fonts (Georgia/Times New Roman/Times/serif) so nothing here waits on a
+   web-font network fetch before it can render (spec: never let the title
+   itself delay LOADING). PART 3: walk-loop stage added between the title
+   and the progress bar. */
+#loading-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  background: #000;
+  overflow: hidden;
+}
+#loading-screen[hidden] { display: none; }
+
+/* BOOT FLOW ROUND: full-bleed background video — object-fit: cover keeps
+   its real aspect ratio (never stretched) while always filling the
+   viewport, matching whatever crop the game's own canvas already uses.
+   z-index 0 so every other loading-screen child (gauge/error/TAP TO START)
+   naturally layers on top without needing per-element z-index bumps. */
+#intro-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  background: #000;
+}
+
+/* 第12次調整: LOADING-only video — identical full-bleed positioning to
+   #intro-video, layered on top of it (same z-index, later in DOM order —
+   see index.html's own comment) so it alone is visible during LOADING.
+   Faded out (never abruptly hidden) at LOADING 100%, matching the existing
+   #loading-gauge-wrap.fade-out pattern — see showTapToStartPrompt(). */
+#loading-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  background: #000;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+}
+#loading-video.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* BOOT FLOW ROUND: the LOADING gauge cluster (title/bar/status/eta) is now
+   an overlay ON TOP of the video, not a flex sibling of it — absolute+
+   centered so it reads the same as the old flex-centered layout did. Faded
+   out (never abruptly hidden) the instant LOADING reaches 100% (see
+   showTapToStartPrompt() in game.js), then TAP TO START takes over the
+   screen's bottom. text-shadow throughout keeps it legible over bright
+   video frames without needing an opaque backdrop that would hide the
+   video underneath. */
+#loading-gauge-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 14TH ROUND (real-device report): was justify-content:center, directly
+     overlapping the intro video's own baked-in "DARK OUT2" title card —
+     measured via a real extracted video frame (ffmpeg, ~7s mark, the
+     title's visible moment): the title text occupies roughly the 38%-57%
+     vertical band of the 1920x864 source frame. Moved to the lower portion
+     via justify-content:flex-end + a vh-based (not fixed-px) bottom
+     padding, so it clears that band on both a narrow mobile-landscape
+     viewport and a wide PC one (object-fit:cover crops the video's
+     LEFT/RIGHT on a narrower-than-source aspect ratio, never its
+     TOP/BOTTOM for any realistic landscape viewport here, so the title's
+     own vertical position stays consistent across devices) — 9vh keeps a
+     clear gap above the true bottom edge too, so it's never clipped on a
+     short window. */
+  justify-content: flex-end;
+  padding-bottom: 9vh;
+  gap: 14px;
+  opacity: 1;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+#loading-gauge-wrap.fade-out { opacity: 0; }
+/* NEXT ROUND PART Q: redesigned wordmark — was a wide, gentle classic
+   serif (Georgia, +0.14em spacing, no lean); real user feedback called it
+   generic/insufficiently "dark SF/horror". CSS-only per spec preference
+   (no new font file): font-stretch: condensed + a narrower system sans
+   (Arial Narrow/Helvetica Neue Condensed, with Impact as a bold-condensed
+   fallback where those are missing) covers "narrower", scaleY/scaleX
+   covers "taller", skewX covers "italic/forward-leaning", the tightened
+   negative letter-spacing plus heavier weight covers "sharp/hard-edged",
+   and a layered near-black + dark-red text-shadow (no soft blur radius
+   beyond a small crisp core) gives the dark SF/horror-film read — legible
+   at both this size and #mode-select-title's smaller one (item scoped to
+   BOTH titles equally, see that selector's own copy of this comment).
+   The literal Arabic numeral "2" already in the markup (never roman "II")
+   inherits every one of these properties automatically since it's plain
+   text within the same element — no separate styling, so it never reads
+   as a stylistically separate afterthought. */
+#loading-title {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, Haettenschweiler, sans-serif;
+  font-stretch: condensed;
+  /* 24TH ROUND item 2: real device testing showed the old fixed 34px still
+     read too small. Fluid clamp() targets ~1.5x (51px) at typical
+     viewport widths while never exceeding what a narrow screen can fit —
+     the skewX/scaleX(0.82) squeeze below already narrows the rendered
+     width further, so clamp()'s vw term is tuned generously (11vw) and
+     the ceiling (54px) is a hard cap, not a target. */
+  font-size: clamp(34px, 11vw, 54px);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: #f2f0ea;
+  transform: skewX(-9deg) scaleY(1.18) scaleX(0.82);
+  display: inline-block;
+  max-width: 92vw;
+  text-shadow: 0 0 2px rgba(0,0,0,0.9), 2px 3px 0 rgba(140,8,8,0.55), 0 4px 14px rgba(0,0,0,0.9);
+}
+
+/* BOOT FLOW ROUND: the old simulated walk-loop stage (#loading-walk-stage/
+   #loading-spotlight/#loading-walk-sprite) is retired — the real intro
+   video (#intro-video above) now provides that "walking through darkness"
+   atmosphere directly, so a second, separate decorative character on top
+   of it would just be visual clutter. startLoadingWalkAnimation() in
+   game.js is kept defined (now simply never called) rather than deleted,
+   per the "don't remove more than necessary" spirit — see its own comment.
+   Every element below gets a text-shadow it didn't need before, now that
+   it sits over a live, bright video frame instead of a flat #05070a. */
+#loading-bar-track {
+  width: min(320px, 70vw);
+  height: 10px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.7);
+}
+#loading-bar-fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #7fffd4, #7fd3ff);
+  transition: width 0.15s ease-out;
+}
+#loading-status {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #e3ebef;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.8);
+}
+#loading-pct { color: #fff; font-weight: 700; }
+/* 6TH ROUND PART 6: real-progress ETA — same visual weight as the status
+   line, not an alarming/pulsing color (this isn't a warning). */
+#loading-eta {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #9fe3ff;
+  min-height: 1.4em;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.8);
+}
+
+/* BOOT FLOW ROUND: LOAD ERROR — a single unified overlay (spec explicitly
+   forbids multiple stacked error notices). Opaque enough to read cleanly
+   over any video frame; z-index 2 so it sits above the gauge (1) and video
+   (0) both, and is the ONLY thing left interactive once shown (the gauge
+   itself keeps updating its (stalled) percentage underneath, harmlessly). */
+#loading-error-box {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(5,7,10,0.92);
+  padding: 24px;
+  text-align: center;
+}
+#loading-error-box[hidden] { display: none; }
+#loading-error-title {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  color: #ff6b6b;
+}
+#loading-error-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #cbd5db;
+  max-width: 82vw;
+}
+#loading-reload-btn {
+  padding: 13px 30px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #f2f0ea;
+  border-radius: 6px;
+}
+#loading-reload-btn:active { background: rgba(255,255,255,0.24); }
+
+/* BOOT FLOW ROUND / UI POLISH ROUND: TAP TO START — bottom-anchored so it
+   never competes with the video's own main subject/composition. Hidden by
+   default; only ever un-hidden by showTapToStartPrompt() in game.js, at the
+   exact LOADING-100% transition, never earlier. The pulse animation is
+   purely decorative (draws the eye) and carries no timing logic of its own.
+   UI POLISH ROUND: nudged up slightly from the previous bottom offset
+   (explicit "3ミリくらい上" request — a modest, viewport-relative bump, not
+   a large relocation), restyled toward the reference image's refined
+   near-future look (moderate weight — not thin, not heavy/black —
+   generous letter-spacing, a soft cool-white glow layered under the
+   existing grounding drop-shadow) but deliberately kept far smaller than
+   that reference's own oversized "PLEASE TAP SCREEN" — legibility over
+   spectacle. Now a flex column so the new sub-guide line stacks cleanly
+   underneath without needing a second absolutely-positioned element. */
+#tap-to-start-btn {
+  position: absolute;
+  left: 50%;
+  bottom: max(58px, env(safe-area-inset-bottom) + 46px);
+  transform: translateX(-50%);
+  z-index: 1;
+  background: transparent;
+  border: none;
+  padding: 10px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  animation: tapToStartPulse 1.7s ease-in-out infinite;
+}
+#tap-to-start-btn[hidden] { display: none; }
+#tap-to-start-main {
+  color: #f6f7f9;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-shadow: 0 0 10px rgba(178,222,255,0.5), 0 0 3px rgba(255,255,255,0.55), 0 1px 4px rgba(0,0,0,0.9);
+}
+/* UI POLISH ROUND: sub-guide line — deliberately smaller/dimmer than the
+   main line and with no glow of its own, so it reads as a quiet assist
+   text, never competing with TAP TO START for attention. Never lang-toggle-
+   driven (see index.html's own comment on this element) — always this
+   exact Japanese guide text regardless of the EN/JA toggle state. */
+#tap-to-start-sub {
+  color: #b7c2ca;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+@keyframes tapToStartPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* 6TH ROUND PART 7/8/9/10/11/12: mode-select screen — replaces the old
+   bare "TAP TO START" prompt. */
+#mode-select-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 14TH ROUND (real PC report): was justify-content:center with no
+     max-height/overflow-y, inside an ancestor chain (html/body/#game-root)
+     that is entirely overflow:hidden with scrolling actively disabled
+     (touch-action:none/overscroll-behavior:none). On a short PC browser
+     window (wide-but-short, well under the ~720px-tall viewport the R13
+     Playwright QA happened to test), the centered flex column overflows
+     symmetrically and the bottommost child (#pc-download-row, the newest
+     addition) silently falls outside the visible/clickable area with no
+     way to scroll to it — same bug class #pause-panel already solves with
+     its own max-height+overflow-y (see its comment). Mirrored here so
+     every child, including a future addition, stays reachable on any
+     window height instead of failing again the same way. */
+  justify-content: flex-start;
+  overflow-y: auto;
+  gap: 14px;
+  background: #05070a;
+  padding: 20px;
+}
+#mode-select-screen[hidden] { display: none; }
+#lang-toggle-btn {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #9fb0bd;
+  border-radius: 4px;
+}
+/* NEXT ROUND PART Q: same redesigned wordmark treatment as #loading-title
+   above (its own comment has the full rationale) — kept in exact sync so
+   the title reads identically wherever it appears. */
+#mode-select-title {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, Haettenschweiler, sans-serif;
+  font-stretch: condensed;
+  /* 24TH ROUND item 2: same ~1.4-1.6x enlargement as #loading-title (30px
+     base -> ~1.5x = 45px target), independently clamped since this screen
+     also hosts the CONTROLLER/TOUCH PANEL buttons below it and must not
+     starve their vertical space on short viewports. */
+  font-size: clamp(30px, 9.5vw, 46px);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: #f2f0ea;
+  transform: skewX(-9deg) scaleY(1.18) scaleX(0.82);
+  display: inline-block;
+  max-width: 92vw;
+  text-shadow: 0 0 2px rgba(0,0,0,0.9), 2px 3px 0 rgba(140,8,8,0.55), 0 4px 14px rgba(0,0,0,0.85);
+}
+#mode-select-subtitle {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: #9fb0bd;
+  margin-bottom: 6px;
+}
+.mode-btn {
+  width: min(340px, 82vw);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #f2f0ea;
+  border-radius: 6px;
+}
+.mode-btn:active { background: rgba(255,255,255,0.22); }
+/* 24TH ROUND item 4: gamepad D-PAD/LEFT STICK focus indicator — CSS-only
+   (matches the existing "no emoji arrows" convention already used for other
+   gamepad-focus states in this project), never applied by touch/click. */
+.mode-btn.gamepad-focused {
+  background: rgba(127,255,212,0.18);
+  border-color: #7fffd4;
+  box-shadow: 0 0 0 2px rgba(127,255,212,0.4), 0 0 14px rgba(127,255,212,0.35);
+}
+#controller-store-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+#controller-store-question {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #6e7d88;
+}
+#controller-store-link {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #7fd3ff;
+  text-decoration: underline;
+}
+#controller-store-link[aria-disabled="true"] {
+  color: #4a5560;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* 22ND ROUND (real-device report item 11): PC DOWNLOAD relocated from
+   #mode-select-screen to the top-right corner of #loading-screen (the
+   background-loop-video + TAP TO START screen) — same top-right corner
+   treatment #lang-toggle-btn already establishes elsewhere in this file
+   for a persistent secondary control on one of these full-screen overlays
+   (reused directly, not a new pixel value), which also happens to match
+   the general placement ALEXIA's own PC download control uses. z-index 5
+   is enough to sit above #intro-video (z-index 0) but well under
+   #tap-to-start-btn's own stacking needs — the two never overlap on
+   screen (button is centered, this sits in the corner) so exact ordering
+   between them doesn't matter in practice. */
+#pc-download-row-top {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  text-align: right;
+}
+#pc-download-link {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #9fffb0;
+  text-decoration: underline;
+}
+#pc-download-hint {
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: #6e7d88;
+  max-width: 42vw;
+}
+
+#scene-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+/* 20TH ROUND (spec sections 2-5, 40-41): ENDING/RESULT hide the ENTIRE
+   gameplay HUD wrapper — real-device report found EXIT distance/LIFE gauge/
+   SURVIVE countdown still on screen through ENDING, and a broader audit
+   (spec section 5) found this SAME #hud div is also the single parent of
+   every other gameplay-only readout (STEALTH/ENEMY HP/DRONE SQUAD/FOCUS/
+   AMMO/WARNING) plus the ambient stage-name label (#theme-label) — none of
+   which belong on a dedicated "run is over" screen either, per spec's own
+   "通常ゲーム画面にフィルターを被せただけ...ではなく" goal. Reuses the SAME
+   body.ending-active class + specificity pattern R19's own
+   `body.ending-active #touch-controls` rule already established (one class,
+   set once in beginEnding(), never toggled back off since ENDING is a
+   one-way terminal phase) — no new JS state needed. Underlying values
+   (state.player.hp, state.escape.timeLeftSec, etc.) are never touched here,
+   purely a display:none on the DOM presentation layer, so nothing else
+   that reads those values downstream is affected. ENDING's own dedicated
+   UI (#ending-skip-btn, #result-screen and everything inside it) lives
+   OUTSIDE #hud, so this rule cannot ever hide SKIP/RESULT/THANK YOU FOR
+   PLAYING/QUIT/ARTIST PAGE. */
+body.ending-active #hud { display: none; }
+
+#hud-top-left {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+/* 9TH ROUND: HP label + bar now their own inner row so the new AMMO
+   readout below can sit directly UNDER the LIFE gauge (item 6), not
+   beside it — #hud-top-left itself switched from a row to a column. */
+#hp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#ammo-below-hp-readout {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #e0e6ea;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+#ammo-below-hp-readout.low { color: #ffb85e; }
+#ammo-below-hp-readout.empty { color: #ff6b6b; }
+#hp-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #ff6b6b;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+#hp-bar-track {
+  width: 160px;
+  height: 10px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#hp-bar-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #ff3b3b, #ff8a3b);
+  transition: width 0.15s ease-out;
+}
+/* 3-LIFE SYSTEM: simple "x3" readout to the right of the HP bar, inside
+   the existing #hp-row flex row (gap:8px already spaces it from the bar
+   without any layout change). Same weight/shadow as #hp-label for visual
+   consistency with the existing HUD, not a new UI style. */
+#life-count-readout {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ff6b6b;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+#hud-top-right {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(14px, env(safe-area-inset-right));
+  text-align: right;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+/* 10TH ROUND (items 25-27): AMMO removed from here — it now lives in
+   exactly ONE place, #ammo-hud below #focus-hud (see its own rule). */
+/* UI POLISH ROUND: the "STEALTH OFF"/"STEALTH ON" HUD text is now always
+   hidden (explicit request — display only, never the underlying state).
+   game.js's own stealthStateEl.textContent/stealthReadoutEl.classList.
+   toggle('active', p.stealth) writes are completely untouched (see
+   updateHud()'s own call site) — they simply now update an invisible
+   element every frame, which is a harmless no-op. This single display:none
+   covers every case (COMBAT/ESCAPE/PAUSE-resume/enemy switch/mobile touch
+   UI/Gamepad) since none of those paths do anything but write to this same
+   element; ESCAPE mode's own pre-existing display:none (see body.escape-
+   mode #stealth-readout below) becomes redundant here but is left in place
+   untouched, causing no conflict (display:none stacking is idempotent). */
+#stealth-readout { display: none; color: #7fd3ff; opacity: 0.85; }
+#stealth-readout.active #stealth-state { color: #7fffb0; font-weight: 700; }
+
+/* 28TH ROUND item 7: persistent (no auto-hide timer, unlike
+   #hud-center-warning above) tap-to-enable guide — stays up until game.js
+   explicitly hides it once audio has genuinely started / a gamepad press
+   has genuinely been detected, never on a fixed timeout, so it can never
+   disappear while the player is still actually stuck. */
+#tap-enable-guide {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  max-width: 80%;
+  text-align: center;
+  padding: 14px 22px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: rgba(10,12,16,0.82);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 8px;
+  box-shadow: 0 0 24px rgba(0,0,0,0.6);
+  animation: tapGuidePulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes tapGuidePulse { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+
+#hud-center-warning {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #ff4040;
+  text-shadow: 0 0 10px rgba(255,40,40,0.8);
+  animation: warnPulse 0.5s infinite alternate;
+}
+@keyframes warnPulse { from { opacity: 0.4; } to { opacity: 1; } }
+
+.hud-bottom-center {
+  position: absolute;
+  bottom: max(8px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: rgba(200,210,220,0.5);
+}
+
+/* RUN FLOW SYSTEM: persistent DISTANCE TO EXIT readout — top-center,
+   deliberately separate from #theme-label's own bottom-center spot so the
+   two never overlap.
+   11TH ROUND (spec sections 26-29): PAUSE moved INTO this readout's old
+   top-center spot (#pause-btn below); EXIT itself moved directly under
+   PAUSE's new position — spec's own explicit "PAUSE旧位置=旧EXIT位置,
+   EXIT=PAUSE直下" (never "PAUSE under LIFE" — that reading is explicitly
+   ruled out in spec section 28). Only the position changed here —
+   distanceRemaining's own update/format/unit logic in game.js is untouched. */
+#distance-readout {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top)) + 30px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #cfe8ff;
+  text-shadow: 0 0 8px rgba(120,180,255,0.5), 0 1px 2px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+/* 12TH ROUND PART A (spec sections 5-6): directly below #distance-readout
+   (EXIT) — same horizontal centering, stacked with EXIT's own line height
+   (12px font + its own vertical rhythm) below it. Hidden by default; shown
+   by updateHud() only while at least one debris piece is in its
+   pre-landing warning window. */
+/* 13TH ROUND (spec section 17): real-device report — WARNING read too
+   small under EXIT. Font-size roughly 1.5x'd (11px -> 17px); the vertical
+   offset below #distance-readout is nudged out slightly (16px -> 19px) to
+   keep clearance from the now-taller text, so it never visually collides
+   with EXIT above it. Position (directly under EXIT)/max-1-shown/no-per-
+   debris-duplicate behavior are all untouched — only size changed here. */
+#exit-warning-readout {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top)) + 30px + 19px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #ff785a;
+  text-shadow: 0 0 10px rgba(255,90,60,0.6), 0 1px 2px rgba(0,0,0,0.85);
+  pointer-events: none;
+}
+
+/* RUN FLOW SYSTEM: shared transition banner (COMBAT_INTRO/EVACUATION_
+   WARNING/ESCAPE_COMPLETE/GAME_OVER short text beats). Sits above the HUD,
+   below the RESULT screen. */
+#run-flow-banner {
+  position: absolute;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+  text-align: center;
+  padding: 0 20px;
+}
+#run-flow-banner[hidden] { display: none; }
+#run-flow-banner-title {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, Haettenschweiler, sans-serif;
+  font-stretch: condensed;
+  font-size: clamp(22px, 6vw, 34px);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #ff5a5a;
+  text-shadow: 0 0 14px rgba(255,40,40,0.65), 0 2px 4px rgba(0,0,0,0.9);
+}
+#run-flow-banner-sub {
+  font-size: clamp(12px, 3.4vw, 16px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f2f0ea;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* RUN FLOW SYSTEM: RESULT screen — same full-screen DOM overlay pattern as
+   #mode-select-screen, layered above #run-flow-banner (z-index) so it
+   fully replaces the banner once shown. The ENDING scene keeps rendering
+   underneath via the canvas, which sits below both. */
+#result-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 19TH ROUND: reserves room for the now-bottom-anchored #result-thanks
+     (see its own comment) by shrinking the flex-centered area the panel
+     centers within, instead of letting the panel's own vertical center sit
+     at true screen-center and risk its bottom edge reaching into the
+     thanks text on a short viewport. Value matches #result-thanks' own
+     approximate rendered height (~20-26px text) + its own bottom offset, so
+     the two never compete for the same space regardless of stat-row count. */
+  padding-bottom: max(58px, calc(env(safe-area-inset-bottom) + 52px));
+}
+#result-screen[hidden] { display: none; }
+#result-overlay-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(3,5,8,0.62);
+}
+#result-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 20px;
+}
+/* 19TH ROUND: tightens the panel's own vertical rhythm on a short
+   mobile-landscape viewport (same max-height:420px breakpoint the touch
+   circular clusters already use elsewhere in this file) so it comfortably
+   fits above the padding-bottom reserved for #result-thanks on
+   #result-screen, verified via 844x390 screenshot QA. */
+@media (max-height: 420px) {
+  #result-panel { gap: 6px; padding: 14px 20px; }
+  #result-title { margin-bottom: 0; }
+}
+#result-title {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, Haettenschweiler, sans-serif;
+  font-stretch: condensed;
+  font-size: clamp(28px, 8vw, 42px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #f2f0ea;
+  text-shadow: 0 0 12px rgba(120,180,255,0.4), 0 2px 4px rgba(0,0,0,0.9);
+  margin-bottom: 4px;
+}
+.result-stat-row {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #cfe8ff;
+}
+/* 19TH ROUND (spec sections 8-9, 36): moved out of the centered
+   #result-panel flex column (see index.html's own comment) to a sibling,
+   absolutely positioned at the bottom of #result-screen with a safe margin
+   off the true bottom edge — "画面最下端ではなく、画面下部の余白を取った
+   位置" per spec. bottom offset matches the existing env(safe-area-inset-
+   bottom) pattern used throughout this file (e.g. .touch-pad/#pause-btn)
+   plus extra clearance so it never crowds a phone's home-indicator area.
+   Confirmed via screenshot QA (844x390 mobile-landscape + 1280x720 PC) to
+   sit clear of both #result-panel's own QUIT/ARTIST PAGE buttons above it
+   and the true screen edge below it. */
+#result-thanks {
+  position: absolute;
+  left: 50%;
+  bottom: max(28px, calc(env(safe-area-inset-bottom) + 22px));
+  transform: translateX(-50%);
+  width: 100%;
+  padding: 0 16px;
+  font-size: clamp(14px, 4vw, 20px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #ffd60a;
+  text-shadow: 0 0 10px rgba(255,214,10,0.5), 0 2px 4px rgba(0,0,0,0.9);
+  text-align: center;
+  box-sizing: border-box;
+}
+.result-btn {
+  width: min(280px, 78vw);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #f2f0ea;
+  border-radius: 6px;
+  text-decoration: none;
+  display: block;
+}
+.result-btn:active { background: rgba(255,255,255,0.22); }
+.result-btn.gamepad-focused {
+  background: rgba(127,255,212,0.18);
+  border-color: #7fffd4;
+  box-shadow: 0 0 0 2px rgba(127,255,212,0.4), 0 0 14px rgba(127,255,212,0.35);
+}
+
+/* 21ST ROUND (real-device report item 4): "QUIT/ARTIST PAGE read as
+   generic full-width UI buttons, too prominent for a closing screen".
+   #result-nav-row lays the two out side by side with their OWN tight gap
+   (independent of #result-panel's own gap, which still spaces the stat
+   rows above at its original value — untouched). The size/style overrides
+   below are a NEW .result-nav-btn class added ALONGSIDE .result-btn (never
+   replacing it) specifically so GAME OVER's own
+   #gameover-continue-btn/#gameover-quit-btn — a different screen/decision,
+   never named in this round's report, and which only ever carries plain
+   .result-btn — keep their original appearance exactly as before, and so
+   .result-btn.gamepad-focused's existing background/border-color/box-shadow
+   (specificity 0-2-0, higher than this single-class .result-nav-btn/
+   .result-nav-btn--link's own 0-1-0) still wins whenever RESULT's own
+   gamepad focus lands on either button — gamepad navigation/focus-ring
+   behavior is completely unchanged, only the RESTING appearance and size
+   are. min-height:34px matches this file's own existing "smallest
+   acceptable touch target" precedent (#r10-dbg-copy-btn, above) rather than
+   an invented number, satisfying "スマートフォンでも押せる最低限のタップ
+   領域は維持" without guessing a value. */
+#result-nav-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 2px;
+}
+.result-nav-btn {
+  width: auto;
+  min-width: 92px;
+  min-height: 34px;
+  padding: 7px 16px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* ARTIST PAGE reads as a real in-world link rather than an ad-banner CTA —
+   no button chrome (border/background dropped) at rest, an underline in
+   its place so it still visually signals "this is clickable" per usual
+   link conventions, matching the round's own explicit "リンクとして自然に
+   見える...広告バナー的な訴求にしない". Only applies at rest — see the
+   comment above for why .gamepad-focused's own teal border/background/glow
+   still wins over this when RESULT's gamepad navigation focuses it. */
+.result-nav-btn--link {
+  background: transparent;
+  border-color: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  color: #b9d4e8;
+}
+
+/* 7TH ROUND 4th sub-part (spec sections 13-15): GAME OVER screen — same
+   layout rules as #result-screen/#result-overlay-dim/#result-panel/
+   #result-title (deliberately duplicated under new ids rather than reused,
+   since GAME_OVER and RESULT are two distinct DOM overlays that could in
+   principle both exist hidden at once); .result-stat-row/.result-btn/
+   .gamepad-focused above are already generic classes, reused as-is. */
+#gameover-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#gameover-screen[hidden] { display: none; }
+#gameover-overlay-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(3,5,8,0.62);
+}
+#gameover-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 20px;
+}
+#gameover-title {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Impact, Haettenschweiler, sans-serif;
+  font-stretch: condensed;
+  font-size: clamp(28px, 8vw, 42px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #ff5c5c;
+  text-shadow: 0 0 12px rgba(255,60,60,0.4), 0 2px 4px rgba(0,0,0,0.9);
+  margin-bottom: 4px;
+}
+
+/* 5TH ROUND PART 14: enemy/boss HP gauge moved from character-overlapping
+   top-center to the screen's top-right corner (spec: "画面右上端へ表示",
+   "キャラクターspriteには重ねないでください") — stacked directly below
+   #hud-top-right (ammo/stealth), same right-aligned column #focus-hud and
+   #pause-btn already use below it. Switching enemies still just updates
+   this same DOM node's text/width (updateHud()'s own logic, untouched). */
+#enemy-hud {
+  position: absolute;
+  top: 54px;
+  right: max(14px, env(safe-area-inset-right));
+  text-align: right;
+  z-index: 45;
+}
+#enemy-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #ffcf5c;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  margin-bottom: 2px;
+}
+#enemy-hp-bar-track {
+  width: 140px;
+  height: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#enemy-hp-bar-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #ffcf5c, #ff8a3b);
+  transition: width 0.15s ease-out;
+}
+
+/* 12TH ROUND PART A (spec section 3): dedicated 3-bar HUD for the run's
+   opening 3-simultaneous-DRONE encounter. Same position/style language as
+   #enemy-hud directly above (top-right, right-aligned, same 140px bar
+   width) so it reads as "the same HUD, showing 3 entries instead of 1" —
+   stacked with an explicit gap between rows so no two bars ever overlap. */
+#drone-squad-hud {
+  position: absolute;
+  top: 54px;
+  right: max(14px, env(safe-area-inset-right));
+  text-align: right;
+  z-index: 45;
+}
+.drone-squad-row {
+  margin-bottom: 6px;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+}
+.drone-squad-row:last-child {
+  margin-bottom: 0;
+}
+/* 16TH ROUND (spec sections 10, 47): the currently-fought drone (always bar
+   0 — see updateHud()'s own comment) reads at full brightness; the other 2
+   (still waiting behind FOG, or already folded into bar 0) stay dimmed but
+   visible — never fully hidden, so all 3 slots remain a legible "3 drones
+   total" readout throughout the encounter. */
+.drone-squad-row.inactive {
+  opacity: 0.45;
+}
+.drone-squad-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #ffcf5c;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  margin-bottom: 2px;
+}
+.drone-squad-bar-track {
+  width: 140px;
+  height: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.drone-squad-bar-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #ffcf5c, #ff8a3b);
+  transition: width 0.15s ease-out;
+}
+
+/* 4th round PART 17: FOCUS gauge (LB / AUTO AIM resource).
+   11TH ROUND (spec sections 30-33): real-device report — FOCUS/AMMO still
+   read from the old top-RIGHT column instead of stacking under PLAYER
+   LIFE. Moved to #hud-top-left's own left-edge (matching its `left` value
+   exactly) with a FIXED absolute top (not a flex child of #hud-top-left),
+   so it never shifts when ESCAPE's SURVIVE timer line toggles the height
+   of #hud-top-left's flex column (spec section 33's explicit "mode切替で
+   anchor/layoutがずれてはいけない" — a flex-child approach here would have
+   reintroduced exactly that bug). text-align switched left-> matches the
+   LIFE gauge's own left-aligned text instead of the old right-aligned
+   top-right-corner column. */
+#focus-hud {
+  position: absolute;
+  top: calc(max(10px, env(safe-area-inset-top)) + 32px);
+  left: max(14px, env(safe-area-inset-left));
+  text-align: left;
+  z-index: 45;
+}
+#focus-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: #b09fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  margin-bottom: 2px;
+}
+#focus-bar-track {
+  width: 100px;
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#focus-bar-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #7fd3ff, #b09fff);
+  transition: width 0.1s ease-out;
+}
+/* AREA C ROUND: charging/full/auto-aim-active states, set via
+   #focus-hud's own className in updateHud() (game.js). "charging" uses
+   the rules above with no override. FULL gets a brighter, glowing fill so
+   the player can see the exact instant a press will activate AUTO AIM;
+   ACTIVE swaps to a warm gold to read as clearly different from both
+   other states while the 5s window is running (also mirrored onto
+   #focus-label's own text, "AUTO AIM" instead of "FOCUS" — see
+   updateHud()). */
+#focus-hud.focus-state-full #focus-bar-fill {
+  background: linear-gradient(90deg, #b0e8ff, #e3d4ff);
+  box-shadow: 0 0 6px rgba(176,159,255,0.9);
+}
+#focus-hud.focus-state-active #focus-bar-fill {
+  background: linear-gradient(90deg, #ffcf5c, #ff9a3b);
+  box-shadow: 0 0 6px rgba(255,159,59,0.9);
+}
+#focus-hud.focus-state-active #focus-label {
+  color: #ffcf5c;
+}
+
+/* 10TH ROUND (items 25-27): AMMO stacks directly below #focus-hud.
+   11TH ROUND (spec sections 30-33): moved into the SAME left-aligned
+   PLAYER LIFE -> FOCUS -> AMMO column #focus-hud now uses (was the old
+   top-right corner column) — same fixed-absolute-top approach as
+   #focus-hud (see its own comment) so this never shifts between COMBAT/
+   ESCAPE either. */
+#ammo-hud {
+  position: absolute;
+  top: calc(max(10px, env(safe-area-inset-top)) + 62px);
+  left: max(14px, env(safe-area-inset-left));
+  text-align: left;
+  z-index: 45;
+}
+#ammo-hud-readout {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #e0e6ea;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+#ammo-hud-readout.low { color: #ffb85e; }
+#ammo-hud-readout.empty { color: #ff6b6b; }
+#ammo-hud-reloading {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ffcf5c;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+/* 4th round: PAUSE button — always visible regardless of touch-controls
+   visibility (spec: never hide the minimum UI needed to progress the
+   game).
+   11TH ROUND (spec sections 26-29): moved to #distance-readout's OLD
+   top-center spot (real-device report: the previously-instructed PAUSE
+   layout still wasn't reflected in the published build) — EXIT itself now
+   sits directly below (see #distance-readout's own updated rule above).
+   Explicitly NOT under #hud-top-left/LIFE (spec section 28 rules that
+   reading out). Applies to COMBAT and ESCAPE identically — this rule has
+   no mode-specific override anywhere, so it cannot drift between modes. */
+#pause-btn {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  background: rgba(20,24,28,0.7);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #e0e6ea;
+  border-radius: 3px;
+}
+
+/* 19TH ROUND (spec sections 1-3, 10-13, 33-37): ENDING-only SKIP button —
+   bottom-right, clear of #pause-btn (top-center) and the gameplay HUD
+   (top-right). z-index 55 matches #pause-btn (both are simple always-
+   clickable overlay buttons, no stacking conflict since neither ever
+   coexists with PAUSE MENU/result-screen at a higher z-index). [hidden]
+   handles both "not yet ENDING" and "RESULT already showing" — see
+   game.js's own show/hide calls in beginEnding()/showResultScreen(). */
+#ending-skip-btn {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 55;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 8px 18px;
+  background: rgba(20,24,28,0.7);
+  border: 1px solid rgba(255,255,255,0.35);
+  color: #e6ecf0;
+  border-radius: 4px;
+}
+#ending-skip-btn[hidden] { display: none; }
+
+/* 21ST ROUND (real-device report item 3): ENDING line-by-line fade-in
+   message — a separate element (shown only during ENDING, hidden again
+   the instant RESULT begins — see game.js's beginEnding()/showResultScreen())
+   so it can never visually collide with #result-thanks/#result-panel once
+   RESULT layers on top. z-index 56 sits just above #ending-skip-btn's own
+   55 (never competes with #result-screen's 220 since the two are mutually
+   exclusive in time). pointer-events:none — purely ambient text, never an
+   interactive element, so it can never intercept a SKIP tap underneath it.
+   22ND ROUND (real-device report item 2): root cause of "ENDINGテキストが
+   低すぎて主人公と重なる" — the bottom-anchored position above sat right
+   where the running player sprite renders (both are screen-bottom-half
+   content). Moved to a TOP anchor instead, per the round's own explicit
+   "PAUSEボタンの真下付近" — the `top` value below is a static CSS fallback
+   only (matches #pause-btn's own `top: max(8px, env(safe-area-inset-top))`
+   formula plus a nominal button-height allowance); the REAL, authoritative
+   position is set every ENDING frame from game.js's updateEndingMessage()
+   by reading #pause-btn's own live getBoundingClientRect().bottom — so this
+   never drifts out of sync with the PAUSE button's actual rendered size/
+   position on any viewport, and no new gap value was invented (reuses the
+   existing ESCAPE_LABEL_CLAMP_MARGIN_PX safety-margin constant already used
+   elsewhere in this file for "clearance below a fixed UI element"). */
+#ending-message {
+  position: absolute;
+  left: 50%;
+  top: calc(max(8px, env(safe-area-inset-top)) + 34px);
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 640px;
+  padding: 0 20px;
+  z-index: 56;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  pointer-events: none;
+  text-align: center;
+}
+#ending-message[hidden] { display: none; }
+/* Each line: opacity 0->1 + a slight upward drift + ease, per the round's
+   own explicit "opacity 0→1、わずかに下から上へ移動、イージング" request —
+   toggled by adding/removing .ending-line-visible from game.js's
+   updateEndingMessage(), timed off the ENDING BGM's real playback position
+   (see index.html's own comment on #ending-message for why). font-style:
+   italic on a serif face gives the "少しイタリック／斜体を感じる書体" the
+   round asked for without resorting to a decorative script font that would
+   hurt readability ("可読性を損なうほど装飾的にはしない"). */
+.ending-line {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 1.1s ease-out, transform 1.1s ease-out;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  font-size: clamp(13px, 3.6vw, 17px);
+  color: #dfe6ea;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+}
+.ending-line.ending-line-visible { opacity: 1; transform: translateY(0); }
+/* Final "Thank you for playing" line — slightly larger/warmer than the
+   lines above it (still clearly secondary to #result-thanks/RESULT itself,
+   which only appears later, per the round's own visual-priority order). */
+.ending-line--thanks {
+  margin-top: 3px;
+  font-size: clamp(15px, 4.2vw, 20px);
+  font-weight: 700;
+  color: #ffd60a;
+  text-shadow: 0 0 10px rgba(255,214,10,0.4), 0 2px 4px rgba(0,0,0,0.9);
+}
+
+/* 19TH ROUND (spec sections 1-3): ENDING/RESULT hide gameplay TOUCH
+   CONTROLS entirely — MOVE stick, AIM stick, both circular clusters, and
+   any other gameplay touch button, all of which live inside the single
+   #touch-controls wrapper (see index.html). This rule's specificity
+   (1 id + 1 class + 1 type = same tier as #touch-controls.touch-controls-
+   visible's own 1 id + 1 class, but with the extra `body` type selector it
+   wins regardless of source order) overrides the player's own TOUCH
+   CONTROLS : ON/OFF preference unconditionally once ENDING begins — real-
+   device report said the panel stayed on screen through ENDING/RESULT with
+   its ON/OFF preference from mid-game. display:none (not opacity/
+   visibility) means the browser never dispatches a pointer event to any
+   child button at all once this class is set, so no separate pointer-
+   events/action-state gating is needed on top of it — see
+   body.ending-active's own set site (beginEnding()) in game.js for why one
+   class, set once, is enough (ENDING/RESULT is a one-way terminal phase,
+   never re-entered into gameplay). PAUSE (#pause-btn, outside #touch-
+   controls) is deliberately left untouched — it is not a gameplay action
+   and causes no misfire, consistent with earlier rounds' own "necessary
+   minimum UI" precedent. */
+body.ending-active #touch-controls { display: none; }
+
+/* 4th round PART 6/7: PAUSE menu overlay. */
+#pause-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.72);
+}
+#pause-menu[hidden] { display: none; }
+#pause-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 220px;
+  max-width: min(90vw, 420px);
+  /* 12TH ROUND (items 1-10): the panel now hosts ENEMY SELECT/STAGE TYPE/
+     GAME MODE/DEBUG on top of what it already had — scrollable so it never
+     overflows a short mobile-landscape viewport. */
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background: rgba(15,18,22,0.92);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+}
+#pause-title {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #fff;
+  margin-bottom: 6px;
+}
+.pause-menu-btn {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #e0e6ea;
+  border-radius: 4px;
+}
+.pause-menu-btn:active { background: rgba(255,255,255,0.22); }
+/* 17TH ROUND: real-device report — ENDING BGM sometimes started mid-game
+   during ordinary PAUSE/RESUME. Root cause: #pause-ending-btn (a real,
+   always-live QA/test trigger for the genuine ENDING flow — see its own
+   index.html comment) sits directly below RESUME with identical spacing/
+   styling, making it an easy accidental mis-tap target on a touch screen
+   during repeated open/close cycling. Extra top margin (visual separation
+   only — no functional/hit-area/z-index change) makes an accidental tap
+   meaningfully less likely without touching the button's own behavior. */
+.pause-menu-btn-ending-test { margin-top: 18px; }
+
+/* 7TH ROUND PART 11: CONTROLLER AIM SENSITIVITY — same visual family as
+   the existing .theme-btn/.enemy-btn active-highlight pattern, just placed
+   inside the PAUSE panel. */
+.pause-menu-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: #9fb0bd;
+  text-align: center;
+  margin-top: 4px;
+}
+/* 13TH ROUND (spec sections 19-20): horizontal slider + native tick marks
+   replacing the old 3-button SLOW/STANDARD/FAST row — see index.html's own
+   comment. */
+/* 13TH ROUND (spec sections 43-48): PLAYER LIFE — 4 buttons in one row,
+   same even-division pattern the old AIM SENSITIVITY row used, with a
+   smaller font/padding than the base .pause-menu-btn so "INFINITE" still
+   fits comfortably at the panel's narrow (min-width:220px) end without
+   overlapping neighboring hit areas (spec section 48's own explicit
+   "hit areaを重ねないこと" / narrow-landscape-phone requirement). */
+#player-life-row {
+  display: flex;
+  gap: 5px;
+}
+.player-life-btn {
+  flex: 1;
+  font-size: 9px;
+  padding: 8px 3px;
+  text-align: center;
+}
+.player-life-btn.active {
+  background: rgba(80,180,255,0.35);
+  border-color: rgba(120,200,255,0.8);
+  color: #fff;
+}
+#aim-sens-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 8px;
+}
+.aim-sens-edge-label {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: #9fb0bd;
+  flex: 0 0 auto;
+}
+#aim-sens-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  accent-color: #5cb4ff;
+  cursor: pointer;
+}
+
+#debug-panel {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  display: flex;
+  gap: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  color: #8fe38f;
+}
+#debug-panel span { color: #fff; }
+#debug-panel[hidden] { display: none; }
+
+/* 8TH ROUND: ?debug=1-only DEBUG MODE panel — [hidden] is the default
+   (normal-URL) state, cleared only from game.js when DEBUG_MODE is true.
+   Bottom-left, small, its own scroll region — deliberately compact so it
+   never obstructs mobile-landscape gameplay (the MOVE stick lives at
+   bottom-left too, but this panel stays pointer-events:none as a whole —
+   see below for the deliberate per-element overrides that make the COPY
+   DEBUG button and the field text tappable/selectable without turning the
+   whole panel into a blocking region). */
+#r10-debug-panel {
+  position: absolute;
+  left: max(6px, env(safe-area-inset-left));
+  bottom: max(6px, env(safe-area-inset-bottom));
+  z-index: 90;
+  width: 186px;
+  max-height: 62vh;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.72);
+  border: 1px solid rgba(120,255,160,0.35);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 8px;
+  line-height: 1.4;
+  color: #a8ffb8;
+  pointer-events: none;
+  white-space: pre-line;
+}
+#r10-debug-panel[hidden] { display: none; }
+#r10-dbg-title, #r10-dbg-log-title {
+  color: #fff;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+  margin-top: 4px;
+}
+#r10-dbg-title { margin-top: 0; }
+#r10-dbg-log {
+  color: #ffd98f;
+  font-size: 7.5px;
+}
+/* ADDENDUM (COPY DEBUG):
+   - #r10-debug-panel itself stays pointer-events:none (above) so it never
+     steals touches meant for gameplay (MOVE stick etc.) anywhere in its
+     bounding box.
+   - The copy row is the one deliberate exception: pointer-events:auto ONLY
+     on this row/button re-enables taps there without affecting the rest
+     of the panel. sticky positioning keeps it reachable at the top even
+     once the event log grows long enough to scroll.
+   - user-select:text on the field/log text (DEBUG-only, per spec item 7)
+     lets a real device long-press-select/copy manually as a backup to the
+     COPY DEBUG button, without touching any other UI in the game. */
+#r10-dbg-copy-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 2px 0 4px;
+  background: rgba(0,0,0,0.85);
+  border-bottom: 1px solid rgba(120,255,160,0.25);
+  pointer-events: auto;
+}
+#r10-dbg-copy-btn {
+  pointer-events: auto;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  min-height: 34px;
+  background: rgba(80,180,255,0.35);
+  border: 1px solid rgba(120,200,255,0.8);
+  border-radius: 4px;
+  color: #fff;
+  touch-action: manipulation;
+}
+#r10-dbg-copy-btn:active { background: rgba(80,180,255,0.6); }
+#r10-dbg-copy-status {
+  font-size: 9px;
+  font-weight: bold;
+  color: #8fffb0;
+}
+#r10-dbg-game, #r10-dbg-player, #r10-dbg-ammo, #r10-dbg-fire, #r10-dbg-shot,
+#r10-dbg-enemy, #r10-dbg-input, #r10-dbg-log {
+  -webkit-user-select: text;
+  user-select: text;
+  pointer-events: auto;
+}
+
+/* 12TH ROUND (items 1-4): these three rows now live INSIDE #pause-panel
+   (see index.html) instead of fixed-positioned directly on the normal
+   play screen — flow naturally in the panel's own column layout, wrap,
+   and center, rather than pinning to a screen corner. selectEnemy()/
+   setGameMode()/theme-btn click handlers are completely unchanged; only
+   this positioning (and the DOM location in index.html) moved. */
+#theme-switch, #gamemode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+/* 13TH ROUND (spec section 18): ENEMY SELECT restructured into two explicit
+   rows (see index.html's own comment) instead of one flex-wrap row that
+   wrapped unevenly. #enemy-switch is now just a column stacking the two
+   row divs; each row is its own centered flex row with even gaps —
+   row 2 (GABRIEL/ADAM SPHERE/ADAM) reads as 3 evenly-spaced buttons,
+   never one alone off-center. */
+#enemy-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#enemy-switch-row1, #enemy-switch-row2 {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+.theme-btn, .enemy-btn, .gamemode-btn {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  padding: 4px 7px;
+  background: rgba(20,24,28,0.7);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #9fb0bd;
+  border-radius: 3px;
+}
+.theme-btn.active, .enemy-btn.active, .gamemode-btn.active {
+  background: rgba(80,180,255,0.35);
+  border-color: rgba(120,200,255,0.8);
+  color: #fff;
+}
+/* 4th round: DRONE/ADAM SPHERE/ADAM have no implementation in this repo
+   (see ENEMY_IMPLEMENTED in game.js) — visually marked so it's clear
+   selecting them won't start a real fight, without removing them from the
+   ENEMY SELECT list (spec asks for all 6 to be listed). */
+.enemy-btn-unimplemented {
+  opacity: 0.45;
+  font-style: italic;
+}
+
+/* 4th round PART 6: touch controls default OFF — [hidden]-equivalent via
+   display:none until .touch-controls-visible is toggled on from PAUSE
+   (see setTouchControlsVisible() in game.js). The touch input
+   implementation itself is untouched; only this visibility rule is new. */
+#touch-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: none;
+}
+#touch-controls.touch-controls-visible {
+  display: block;
+}
+.touch-pad {
+  position: absolute;
+  bottom: max(70px, calc(env(safe-area-inset-bottom) + 70px));
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.2);
+  touch-action: none;
+}
+.touch-pad-label {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: rgba(200,210,220,0.55);
+}
+.touch-stick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  transition: none;
+}
+#touch-move-pad { left: max(14px, env(safe-area-inset-left)); }
+/* Unified AIM+LIGHT stick — same position the old separate LIGHT stick
+   always had; only its label text changed (see index.html). */
+#touch-light-pad { left: calc(max(14px, env(safe-area-inset-left)) + 110px); }
+
+/* 7TH ROUND 4th sub-part (spec sections 20-27, HISTORICAL): the button
+   cluster that replaces the old #touch-buttons grid + the old right-side
+   #touch-aim-pad stick. 8TH/11TH ROUND: hit areas enlarged, then arranged
+   as independently-positioned buttons around a round DASH (superseded).
+   16TH/17TH ROUND: rebuilt as a one-piece UPPER-semicircle panel (large
+   CENTER circle + a 3-wedge SVG semicircle behind it).
+   18TH ROUND (spec sections 27-48): rebuilt again into a full CIRCLE —
+   the SVG now covers BOTH the upper AND lower half (viewBox -150..150 on
+   both axes, was -150..150 x / -140..0 y), upper 2-way split (FOCUS/
+   RELOAD or EAST SHADOW/WEST SHADOW) + lower 2-or-3-way split (WEST/
+   [SOUTH/]EAST DASH). Each wedge's drawn <path> shape IS still its own hit
+   area (SVG path hit-testing is shape-accurate, never a bounding rectangle
+   — spec section 44's explicit requirement). .touch-fan-wrap stays a
+   ZERO-SIZE anchor at the cluster's true CENTER point — both the SVG and
+   the center button are centered on that single point via left:0/bottom:0
+   + an IDENTICAL translate(-50%,50%) transform (the SVG's viewBox is now
+   symmetric around its own local origin, so this centers it exactly the
+   same way the center button was already centered — previously the SVG
+   only needed horizontal centering since its old geometry never extended
+   below the anchor). COMBAT and ESCAPE share the same radii/angles (spec
+   section 43's "同じデザイン言語"), only labels/actions differ:
+        FOCUS/EAST SHADOW   ╲          ╱   RELOAD/WEST SHADOW
+                              ╲        ╱
+                             [ SHOT/DASH ]
+                              ╱   |    ╲
+                    WEST DASH  SOUTH*  EAST DASH
+   COMBAT: CENTER=SHOT, up-left=FOCUS, up-right=RELOAD,
+           down-left=WEST DASH, down-center=SOUTH DASH, down-right=EAST DASH.
+   ESCAPE: CENTER=DASH, up-left=EAST SHADOW, up-right=WEST SHADOW,
+           down-left=WEST DASH, down-right=EAST DASH (*no SOUTH slot). */
+.touch-fan-wrap {
+  position: absolute;
+  right: calc(max(120px, calc(env(safe-area-inset-right) + 120px)) + 118px);
+  bottom: calc(max(70px, calc(env(safe-area-inset-bottom) + 70px)) + 118px);
+  width: 0;
+  height: 0;
+}
+.touch-fan-svg {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 240px;
+  height: 240px;
+  transform: translate(-50%, 50%);
+  overflow: visible;
+  touch-action: none;
+}
+.touch-fan-wedge {
+  fill: rgba(255,255,255,0.08);
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 1;
+  touch-action: none;
+}
+.touch-fan-wedge:active { fill: rgba(255,255,255,0.3); }
+.touch-fan-divider {
+  stroke: rgba(255,255,255,0.25);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.touch-fan-label {
+  fill: #e0e6ea;
+  font-size: 11px;
+  font-family: inherit;
+  text-anchor: middle;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+.touch-fan-center {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100px;
+  height: 100px;
+  transform: translate(-50%, 50%);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #e0e6ea;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  touch-action: none;
+}
+.touch-fan-center:active { background: rgba(255,255,255,0.3); }
+
+/* Narrow-height landscape (small phones): shrink touch controls a bit —
+   scales the whole fan (SVG + center circle) by the same proportion, so
+   the two stay sized relative to each other; the SVG's own viewBox is
+   untouched (its internal wedge geometry scales automatically with its
+   rendered size). */
+@media (max-height: 420px) {
+  .touch-pad { width: 78px; height: 78px; bottom: max(56px, calc(env(safe-area-inset-bottom) + 56px)); }
+  .touch-fan-wrap {
+    right: calc(max(120px, calc(env(safe-area-inset-right) + 120px)) + 92px);
+    bottom: calc(max(70px, calc(env(safe-area-inset-bottom) + 70px)) + 92px);
+  }
+  .touch-fan-svg { width: 188px; height: 188px; }
+  .touch-fan-center { width: 78px; height: 78px; font-size: 11px; }
+}
+
+/* ESCAPE-EXCLUSIVE GAMEPLAY MODE (state.gameMode === 'escape', toggled onto
+   <body> by the SAME existing ESCAPE theme button — see game.js's
+   .theme-btn click handler). Purely visual: hides the combat-only HUD
+   readouts/touch buttons that have no meaning with zero attack commands
+   (spec section 7), and reveals the two ESCAPE-only JUMP/SHADOW touch
+   buttons that have no LAB equivalent. Never affects LAB/ARMORED, since
+   body.escape-mode is only ever present while state.gameMode === 'escape'. */
+.touch-escape-only { display: none; }
+body.escape-mode .touch-escape-only { display: block; }
+/* 13TH ROUND (spec section 42): real-device report — SURVIVE text read too
+   small. Font-size roughly 1.5x'd (10px -> 15px). This element sits inside
+   #hud-top-left's own flex column (column-flow, gap:3px, no fixed child
+   offsets) alongside LIFE/AMMO, so the larger box is naturally
+   accommodated without any manual position/gap edits — verified via
+   SIMULATED QA (no overlap with LIFE/FOCUS/AMMO). */
+#escape-timeleft-readout {
+  display: none;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  /* 12TH ROUND (items 48-49): SURVIVE MM:SS readout — red, per spec. */
+  color: #ff3b3b;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+body.escape-mode #escape-timeleft-readout { display: block; }
+body.escape-mode #ammo-hud,
+body.escape-mode #stealth-readout,
+body.escape-mode #enemy-hud,
+body.escape-mode #drone-squad-hud,
+body.escape-mode #focus-hud,
+body.escape-mode #touch-combat-fan-wrap,
+body.escape-mode #touch-light-pad {
+  /* 9TH ROUND item 20: ESCAPE MODE has no LIGHT input/rendering/UI at all —
+     it is a survive-until-TIME-LIMIT mode, not explore-in-darkness. SHOT/
+     RELOAD/FOCUS have zero meaning with zero attack commands either
+     (unchanged reasoning, 7TH ROUND 4th sub-part just renamed FIRE->SHOT).
+     16TH ROUND: #touch-shot/#touch-reload/#touch-focus are now nested
+     inside #touch-combat-fan-wrap (the whole COMBAT semicircle cluster,
+     including the new COMBAT-only #touch-combat-dash wedge) — hiding the
+     one wrap hides all of them together, so they no longer need individual
+     selectors here. */
+  display: none;
+}
